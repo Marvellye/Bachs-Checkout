@@ -16,6 +16,7 @@
 
 import crypto from "node:crypto";
 import { CardVault, KNOWN_CARD_ACTIONS } from "./card-vault.js";
+import { nextCardStep, driveCardVerification, cardChallenge, AVS_FIELDS } from "./card-verification.js";
 
 export const SANDBOX_API = "https://sandbox-api.bachs.io";
 export const LIVE_API = "https://api.bachs.io";
@@ -362,6 +363,15 @@ export class CheckoutSession {
     });
   }
 
+  /** The vault for this session, carrying any discovered action ids. */
+  #vault() {
+    return new CardVault({
+      token: this.token,
+      checkoutOrigin: this.checkoutOrigin,
+      ...(this.cardActionIds ? { actionIds: this.cardActionIds } : {}),
+    });
+  }
+
   async #call(path, { method = "GET", body } = {}) {
     const res = await fetch(
       `${this.apiBase}/v1/public/checkouts/${encodeURIComponent(this.token)}${path}`,
@@ -450,11 +460,7 @@ export class CheckoutSession {
     const quote = await this.quote({ paymentMethod: r.paymentMethod, currency: r.currency, paymentRail });
 
     if (r.kind === "card" && card) {
-      const vault = new CardVault({
-        token: this.token,
-        checkoutOrigin: this.checkoutOrigin,
-        ...(this.cardActionIds ? { actionIds: this.cardActionIds } : {}),
-      });
+      const vault = this.#vault();
       const { handle } = await vault.tokenize(card);
       const result = await vault.complete({
         handle,
@@ -471,6 +477,103 @@ export class CheckoutSession {
       ...(phone ? { phone_number: phone } : {}),
     });
     return normalise(result, r, quote);
+  }
+
+  /**
+   * Pay by card and let the API drive verification.
+   *
+   * The charge may come back asking for an OTP, a PIN, an address, or a redirect to the issuer.
+   * `onVerification` is called once per challenge with `{ action, type, attempt, canResend, fields }`;
+   * return `{ otp }`, `{ pin }`, `{ address }`, a bare string, or `null` to stop and hand the step
+   * back to your own UI.
+   *
+   * The resolved value is a normalised card payment plus `step` (what to do next, if anything) and,
+   * when `waitForResult` is set, `final`.
+   *
+   * @param {object} opts
+   * @returns {Promise<NormalisedPayment & {step: object, verificationAttempts: number, final?: object}>}
+   */
+  async payCard({
+    card,
+    currency = "USD",
+    cardOptions,
+    onVerification,
+    maxVerificationAttempts = 3,
+    waitForResult = false,
+    waitOptions,
+  } = {}) {
+    if (!card) throw new Error("payCard: card is required");
+
+    const rail = resolveRail({ rail: "card", currency });
+    const quote = await this.quote({ paymentMethod: rail.paymentMethod, currency: rail.currency });
+
+    const vault = this.#vault();
+    const { handle } = card.sealed ? await vault.tokenizeSealed(card.sealed) : await vault.tokenize(card);
+
+    const first = await vault.complete({
+      handle,
+      quoteId: quote.quote_id,
+      deviceInformation: cardOptions?.deviceInformation,
+    });
+
+    const driven = await driveCardVerification({
+      vault,
+      result: first,
+      onVerification,
+      maxAttempts: maxVerificationAttempts,
+    });
+
+    // The verification response is authoritative: it may clear `next_action` / `auth_model`, so
+    // only carry over identifying fields from the first charge, never challenge state.
+    const merged = {
+      ...driven.result,
+      charge_id: driven.result?.charge_id || first?.charge_id || null,
+      transaction_id: driven.result?.transaction_id || first?.transaction_id || null,
+      payment_type: driven.result?.payment_type || first?.payment_type,
+      amount: driven.result?.amount ?? first?.amount ?? null,
+      currency: driven.result?.currency ?? first?.currency,
+    };
+    const step = nextCardStep(merged);
+    const payment = normalise(merged, rail, quote);
+
+    let final = null;
+    if (waitForResult && payment.chargeId && (step.action === "poll" || step.action === "done")) {
+      final = await this.waitForPayment(payment.chargeId, waitOptions);
+    }
+
+    return {
+      ...payment,
+      step,
+      verificationAttempts: driven.attempts,
+      ...(driven.reason ? { verificationReason: driven.reason } : {}),
+      ...(final ? { final } : {}),
+    };
+  }
+
+  /**
+   * Answer an OTP challenge manually (when you render your own screen instead of using payCard).
+   * Returns the next step plus the raw response.
+   */
+  async submitOtp({ chargeId, otp, resend = false }) {
+    const raw = await this.#vault().authorizeOtp({ chargeId, otp, resend });
+    return { step: nextCardStep(raw, { chargeId }), raw };
+  }
+
+  /** Answer an AVS challenge manually. */
+  async submitAvs({ chargeId, address }) {
+    const raw = await this.#vault().submitAvs({ chargeId, address });
+    return { step: nextCardStep(raw, { chargeId }), raw };
+  }
+
+  /** Submit a card PIN when the issuer asks for one after the charge. */
+  async submitPin({ chargeId, pin }) {
+    const raw = await this.#vault().authorizePin({ chargeId, pin });
+    return { step: nextCardStep(raw, { chargeId }), raw };
+  }
+
+  /** Just the next step for a charge response (no request). */
+  cardStep(result, { chargeId } = {}) {
+    return nextCardStep(result, { chargeId });
   }
 
   /** Poll a charge until it reaches a terminal state. */
@@ -601,4 +704,5 @@ export function normalise(result, rail, quote) {
 }
 
 export { CardVault, KNOWN_CARD_ACTIONS };
+export { cardChallenge, nextCardStep, driveCardVerification, AVS_FIELDS };
 export default Bachs;

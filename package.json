@@ -1,6 +1,6 @@
 {
   "name": "bachs-checkout",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial Bachs SDK: card, bank transfer, crypto and mobile money payments in your own UI, with no redirect.",
   "type": "module",
   "main": "./src/index.js",
@@ -26,7 +26,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test tests/unit.test.js",
+    "test": "node --test tests/unit.test.js tests/card-verification.test.js",
     "test:integration": "node --test tests/integration.test.js",
     "test:all": "node --test tests/",
     "postman:build": "python3 tools/build-postman.py",
@@ -52,7 +52,7 @@
     "unofficial"
   ],
   "author": "Marvellous Ezekiel (https://github.com/Marvellye)",
-  "license": "MIT",
+  "license": "WTFPL",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Marvellye/Bachs-Checkout.git"

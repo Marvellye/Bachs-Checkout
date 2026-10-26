@@ -4,7 +4,7 @@
 
 [![npm](https://img.shields.io/npm/v/bachs-checkout.svg)](https://www.npmjs.com/package/bachs-checkout)
 [![tests](https://github.com/Marvellye/Bachs-Checkout/actions/workflows/ci.yml/badge.svg)](https://github.com/Marvellye/Bachs-Checkout/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/bachs-checkout.svg)](./LICENSE)
+[![license](https://img.shields.io/badge/license-WTFPL-blue.svg)](./LICENSE)
 
 The hosted checkout is a fine default. This is for when it isn't: when you need the payment step
 inside your own product, when the account numbers and wallet addresses must render in your layout,
@@ -29,6 +29,7 @@ npm install bachs-checkout
 - [The rails](#the-rails)
 - [Session shapes](#session-shapes)
 - [Card payments](#card-payments)
+- [Card verification (OTP, PIN, AVS, 3DS)](#card-verification-otp-pin-avs-3ds)
 - [Webhooks](#webhooks)
 - [Testing](#testing)
 - [Postman](#postman)
@@ -287,6 +288,87 @@ there is no server-side shortcut.
 
 ---
 
+## Card verification (OTP, PIN, AVS, 3DS)
+
+A card charge is not "charge and done". The issuer can come back asking for an OTP, a card PIN, an
+address, or a hop to their own page — and after each answer it may ask for something else. The API
+says what it wants in `next_action`, so this SDK does not guess: it turns that into an explicit step
+your UI switches on.
+
+```js
+const step = nextCardStep(completeResponse);
+
+switch (step.action) {
+  case "collect_otp":     showOtpScreen(step.chargeId, step.canResend); break;
+  case "collect_pin":     showPinScreen(step.chargeId); break;
+  case "collect_avs":     showAddressForm(step.chargeId, step.fields); break;
+  case "redirect":        location.assign(step.url); break;
+  case "confirm_inline":  confirmWithStripeElements(step.clientSecret); break;
+  case "poll":            watch(step.chargeId); break;
+  case "done":            celebrate(); break;
+}
+```
+
+### Let the SDK drive it
+
+```js
+const payment = await checkout.payCard({
+  card: { card_number: "4242424242424242", expiry_month: 9, expiry_year: 2033, cvv: "431" },
+  currency: "USD",
+  onVerification: async ({ action, attempt, canResend }) => {
+    if (action === "collect_otp") return { otp: await promptForCode({ attempt, canResend }) };
+    if (action === "collect_avs") return { address: await promptForAddress() };
+    return null;                       // give me the step back and I'll render it myself
+  },
+  waitForResult: true,
+});
+
+payment.type;                  // "card"
+payment.step.action;           // "poll" | "collect_otp" | "redirect" | ...
+payment.verificationAttempts;  // how many challenges were answered
+payment.final?.charge_status;  // "succeeded" when waitForResult was set
+```
+
+`onVerification` is called once per challenge growing `attempt` from 1. Returning `null` stops the
+loop and hands you `payment.step` — nothing is submitted behind your back.
+
+### Drive it yourself
+
+```js
+const { step, raw } = await checkout.submitOtp({ chargeId, otp: "123456" });
+
+if (step.action === "collect_otp") {
+  showError("That code didn't work", { canResend: step.canResend });
+}
+
+await checkout.submitOtp({ chargeId, resend: true });        // re-issue the code
+await checkout.submitAvs({ chargeId, address: { line1, city, state, postal_code } });
+await checkout.submitPin({ chargeId, pin: "1234" });         // only when step.action === "collect_pin"
+```
+
+### What the wire actually looks like
+
+| Challenge | Request sent to the checkout's `authorizeCardStep` |
+| --- | --- |
+| OTP | `{ charge_id, type: "otp", otp }` |
+| Resend | `{ charge_id, type: "resend_otp" }` |
+| Address | `{ charge_id, type: "avs", address: { line1, city, state, postal_code, country } }` |
+| PIN | `authorizePinViaVault(chargeId, pin)` — no token argument, unlike the others |
+
+A **wrong OTP is not an error**. It returns `status: "failed"` *with* `next_action.type` still
+`requires_otp`, which is why `nextCardStep` maps it back to `collect_otp` — the screen stays open and
+the customer retries. Anything else turns a retryable typo into a dead payment.
+
+Guards: `maxVerificationAttempts` (default 3) stops a loop from becoming infinite, and
+`driveCardVerification` refuses to submit an answer the caller did not provide.
+
+### Test coverage
+
+`tests/card-verification.test.js` covers every branch with captured shapes: OTP, resend, wrong code,
+AVS, PIN, redirect, inline, plain poll, junk input, and the full loop with a scripted vault.
+
+---
+
 ## Webhooks
 
 Verify against the **raw** body, before `JSON.parse`, then dedupe by event id.
@@ -436,9 +518,11 @@ Read these; each one cost real time.
 2. **No plaintext card data, ever.** Sealing keeps it out of your storage, but you are still handling
    card data in a custom form. Check your PCI obligations (SAQ-A vs SAQ-D) before going live; the
    hosted checkout is the lower-scope option.
-3. **3DS / OTP is implemented but unverified.** `next_action.type === "requires_otp"` and
-   `authorizeOtp()` exist, but sandbox cards auto-approve, so that branch has never been exercised
-   end to end. Test it with a real card before relying on it.
+3. **3DS / OTP is guided and fixture-tested, but no live issuer has demanded it yet.** The flow is
+   driven entirely by `next_action` and every branch is covered by tests, but sandbox cards
+   auto-approve, so the OTP/AVS round trip has never completed against a real bank. The PIN action's
+   argument order is inferred from the checkout build rather than observed. Charge a real card that
+   demands 3DS before you rely on it.
 4. **`products` is `null`, not `[]`**, on product-less sessions. `products.length` throws.
 5. **`localhost` is rejected** for `success_url` / `cancel_url` ("must be a publicly accessible URL").
    Irrelevant for a no-redirect UI — nothing navigates there — but fatal for the hosted rail.
@@ -468,7 +552,7 @@ If this saved you time, [sponsor the work](https://github.com/sponsors/Marvellye
 
 ## License
 
-[MIT](./LICENSE) © Marvellous Ezekiel
+[WTFPL](./LICENSE) © Marvellous Ezekiel — do what the fuck you want to.
 
 Bachs and the Bachs name are trademarks of their owners. This project is an independent, unofficial
 client.

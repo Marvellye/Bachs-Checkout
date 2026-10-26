@@ -4,6 +4,44 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-26
+
+Card verification is now a first-class, server-guided flow instead of a documented gap.
+
+### Added
+
+- `nextCardStep(response)` — a pure, total mapping from the API's `next_action` to an action your UI
+  switches on: `collect_otp`, `collect_pin`, `collect_avs`, `redirect`, `confirm_inline`, `poll`,
+  `done`.
+- `cardChallenge(response)` and `AVS_FIELDS` for rendering the specific prompt.
+- `driveCardVerification({ vault, result, onVerification, maxAttempts })` — runs the challenge loop,
+  asking your callback for each answer, with a hard attempt ceiling.
+- `CheckoutSession.payCard({ card, onVerification, waitForResult })` — charge + verification + poll in
+  one call, returning the normalised payment with `step`, `verificationAttempts`, `final`.
+- Manual steps for custom screens: `submitOtp({ chargeId, otp | resend })`,
+  `submitAvs({ chargeId, address })`, `submitPin({ chargeId, pin })`, and the pure `cardStep()`.
+- `CardVault.authorizeOtp`, `submitAvs`, `authorizePin` with the exact payloads the checkout build
+  sends: `{ charge_id, type: "otp", otp }`, `type: "resend_otp"`, `type: "avs"`.
+- 27 new unit tests covering every verification branch, including a wrong OTP that must re-prompt
+  rather than fail the payment.
+- The example UI renders the guided steps: OTP entry with resend, address form, issuer redirect.
+
+### Fixed
+
+- A verification response could inherit a stale `auth_model: "OTP"` from the original charge, which
+  made a completed verification look like it still needed a code. Challenge state now comes only from
+  the latest response.
+
+### Changed
+
+- Licence is now WTFPL.
+- `npm test` runs both suites (`tests/unit.test.js`, `tests/card-verification.test.js`).
+
+### Known limitations
+
+- Sandbox cards auto-approve, so the OTP/AVS round trip has not been observed against a live issuer.
+- `authorizePinViaVault`'s argument order is inferred from the checkout build, not observed.
+
 ## [0.1.0] - 2026-10-26
 
 First public release.

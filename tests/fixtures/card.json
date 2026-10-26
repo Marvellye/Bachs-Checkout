@@ -62,5 +62,37 @@
     "handle": "vlt_00000000000000000000000000000000",
     "brand": "visa",
     "last4": "4242"
+  },
+  "complete_requires_avs": {
+    "payment_type": "processing",
+    "auth_model": "AVS",
+    "next_action": { "type": "requires_avs" },
+    "charge_id": "ch_0000000000000000000000000card03",
+    "transaction_id": "flw_tx_0000000000000003",
+    "polling_required": true
+  },
+  "complete_requires_pin": {
+    "payment_type": "processing",
+    "auth_model": "PIN",
+    "next_action": { "type": "requires_pin" },
+    "charge_id": "ch_0000000000000000000000000card04",
+    "transaction_id": "flw_tx_0000000000000004",
+    "polling_required": true
+  },
+  "authorize_otp_wrong": {
+    "status": "failed",
+    "charge_id": "ch_0000000000000000000000000card02",
+    "next_action": { "type": "requires_otp", "can_resend": true }
+  },
+  "authorize_otp_accepted": {
+    "status": "succeeded",
+    "charge_id": "ch_0000000000000000000000000card02",
+    "next_action": null,
+    "polling_required": true
+  },
+  "authorize_otp_redirect": {
+    "status": "pending",
+    "charge_id": "ch_0000000000000000000000000card05",
+    "next_action": { "type": "requires_redirect", "redirect_url": "https://issuer.example/3ds/challenge" }
   }
 }

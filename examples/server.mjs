@@ -131,15 +131,39 @@ const server = http.createServer(async (req, res) => {
       const { handle, brand, last4 } = await vault.tokenizeSealed(sealed);
       const result = await vault.complete({ handle, quoteId: quote.quote_id, deviceInformation: device });
 
+      // The step tells the page what to render next: OTP, AVS, redirect, or poll.
       return json(res, 200, {
         type: "card",
         brand,
         last4,
         chargeId: result.charge_id,
         paymentType: result.payment_type,
-        nextAction: result.next_action || null,
+        step: checkout.cardStep(result),
         raw: result,
       });
+    }
+
+    // 4b. Answer the verification the bank asked for (OTP / address).
+    if (req.method === "POST" && url.pathname === "/api/pay/card/otp") {
+      const { token, chargeId, otp, resend } = await readBody(req);
+      if (!token || !chargeId) return json(res, 400, { error: "token and chargeId are required" });
+      const checkout = new CheckoutSession(token, {
+        checkoutOrigin: ORIGIN,
+        cardActionIds: await actionIdsFor(token),
+      });
+      const { step, raw } = await checkout.submitOtp({ chargeId, otp, resend: Boolean(resend) });
+      return json(res, 200, { step, raw });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/pay/card/avs") {
+      const { token, chargeId, address } = await readBody(req);
+      if (!token || !chargeId) return json(res, 400, { error: "token and chargeId are required" });
+      const checkout = new CheckoutSession(token, {
+        checkoutOrigin: ORIGIN,
+        cardActionIds: await actionIdsFor(token),
+      });
+      const { step, raw } = await checkout.submitAvs({ chargeId, address });
+      return json(res, 200, { step, raw });
     }
 
     // 5. Poll a charge.

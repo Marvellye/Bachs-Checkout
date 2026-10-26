@@ -37,13 +37,17 @@ keys. Sandbox keys start with `sk_sandbox_` and cannot move real money.
 ## Tests
 
 ```bash
-npm test                 # 31 tests, no network - this is what CI runs
+npm test                 # 58 tests, no network - this is what CI runs
 npm run test:integration # every rail against the sandbox; needs BACHS_SECRET_KEY
 npm run postman:smoke    # chained Postman flow through newman
 ```
 
 Integration tests create real sandbox sessions and charges. They refuse to run with a `sk_live_` key,
 by design — do not remove that check.
+
+Card verification (`src/card-verification.js`) is fixture-driven and must stay pure: `nextCardStep`
+takes a response and returns a step, with no I/O. If you add a challenge type, add its fixture, its
+`nextCardStep` case, and a request-payload test asserting the exact arguments.
 
 When adding a fixture, capture it from the sandbox and then **sanitise** it: replace charge ids,
 checkout tokens, client secrets, addresses and account numbers with obviously fake values. Commit

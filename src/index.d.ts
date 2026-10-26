@@ -268,6 +268,92 @@ export declare function resolveRail(opts?: { rail?: string; currency?: string })
   kind: "card" | "bank_transfer" | "crypto" | "mobile_money" | "other";
 };
 
+export type CardStepAction =
+  | "collect_otp"
+  | "collect_pin"
+  | "collect_avs"
+  | "redirect"
+  | "confirm_inline"
+  | "poll"
+  | "done";
+
+/** What to do next with a card charge. Derived from `next_action`, never guessed. */
+export interface CardStep {
+  action: CardStepAction;
+  chargeId: string | null;
+  type?: string;
+  /** Only meaningful for `collect_otp`. */
+  canResend?: boolean;
+  /** Only for `redirect`. */
+  url?: string;
+  /** Only for `collect_avs`. */
+  fields?: string[];
+  /** Only for `confirm_inline` (Stripe Elements rail). */
+  clientSecret?: string;
+  nextAction?: CompleteResponse["next_action"];
+}
+
+export interface CardChallenge {
+  type: "otp" | "pin" | "avs" | "redirect";
+  canResend?: boolean;
+  url?: string;
+  fields?: string[];
+  nextAction?: CompleteResponse["next_action"];
+}
+
+export declare const AVS_FIELDS: string[];
+
+export declare function cardChallenge(result: CompleteResponse): CardChallenge | null;
+
+export declare function nextCardStep(
+  result: CompleteResponse,
+  fallback?: { chargeId?: string }
+): CardStep;
+
+export type VerificationAnswer =
+  | { otp?: string; resend?: boolean }
+  | { pin?: string }
+  | { address?: { line1: string; city: string; state: string; postal_code: string; country?: string } }
+  | string
+  | null
+  | undefined;
+
+export declare function driveCardVerification(opts: {
+  vault: CardVault;
+  result: CompleteResponse;
+  onVerification?: (challenge: CardStep & { attempt: number }) =>
+    VerificationAnswer | Promise<VerificationAnswer>;
+  maxAttempts?: number;
+}): Promise<{ result: CompleteResponse; step: CardStep; attempts: number; reason?: string }>;
+
+export interface PayCardOptions {
+  card:
+    | {
+        card_number: string;
+        expiry_month: number | string;
+        expiry_year: number | string;
+        cvv: string;
+        cardholder_name?: string;
+        pin?: string;
+      }
+    | { sealed: { encrypted_key: string; iv: string; ciphertext: string } };
+  currency?: string;
+  cardOptions?: { deviceInformation?: Record<string, unknown> };
+  /** Called once per challenge. Return `null` to stop and hand the step back to your UI. */
+  onVerification?: (challenge: CardStep & { attempt: number }) =>
+    VerificationAnswer | Promise<VerificationAnswer>;
+  maxVerificationAttempts?: number;
+  waitForResult?: boolean;
+  waitOptions?: { timeoutMs?: number; intervalMs?: number; onTick?: (status: ChargeStatus) => void };
+}
+
+export type CardPaymentResult = NormalisedPayment & {
+  step: CardStep;
+  verificationAttempts: number;
+  verificationReason?: string;
+  final?: ChargeStatus | null;
+};
+
 export declare function normalise(
   result: CompleteResponse,
   rail: { paymentMethod: string; currency: string; kind: string },
@@ -300,6 +386,21 @@ export declare class CheckoutSession {
   authorizeMobileMoney(body: Record<string, unknown>): Promise<unknown>;
   confirmPayment(body: Record<string, unknown>): Promise<unknown>;
   pay(opts?: PayOptions): Promise<NormalisedPayment>;
+  /** Pay by card and let the API drive OTP / PIN / AVS / redirect verification. */
+  payCard(opts: PayCardOptions): Promise<CardPaymentResult>;
+  /** Answer an OTP challenge manually; returns the next step. */
+  submitOtp(input: { chargeId: string; otp?: string; resend?: boolean }):
+    Promise<{ step: CardStep; raw: CompleteResponse }>;
+  /** Answer an address (AVS) challenge manually. */
+  submitAvs(input: {
+    chargeId: string;
+    address: { line1: string; city: string; state: string; postal_code: string; country?: string };
+  }): Promise<{ step: CardStep; raw: CompleteResponse }>;
+  /** Submit a card PIN when the issuer asks for one after the charge. */
+  submitPin(input: { chargeId: string; pin: string }):
+    Promise<{ step: CardStep; raw: CompleteResponse }>;
+  /** The next step for a charge response, without making a request. */
+  cardStep(result: CompleteResponse, fallback?: { chargeId?: string }): CardStep;
   waitForPayment(
     chargeId: string,
     opts?: { timeoutMs?: number; intervalMs?: number; onTick?: (status: ChargeStatus) => void }
@@ -454,8 +555,12 @@ export declare class CardVault {
     sealed: { encrypted_key: string; iv: string; ciphertext: string }
   ): Promise<{ handle: string; brand?: string; last4?: string; collectPin: boolean }>;
   complete(input: { handle: string; quoteId: string; deviceInformation?: Record<string, unknown> }): Promise<CompleteResponse>;
-  authorizeOtp(body: Record<string, unknown>): Promise<unknown>;
-  authorizePin(body: Record<string, unknown>): Promise<unknown>;
+  authorizeOtp(input: { chargeId: string; otp?: string; resend?: boolean }): Promise<any>;
+  submitAvs(input: {
+    chargeId: string;
+    address: { line1: string; city: string; state: string; postal_code: string; country?: string };
+  }): Promise<any>;
+  authorizePin(input: { chargeId: string; pin: string }): Promise<any>;
 }
 
 export declare const KNOWN_CARD_ACTIONS: Record<string, string>;

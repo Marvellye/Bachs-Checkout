@@ -171,6 +171,7 @@ $("pay").onclick = async () => {
     }
 
     if (payment.error) throw new Error(payment.detail || payment.error);
+    state.lastChargeId = payment.chargeId || payment.step?.chargeId || null;
     renderPayment(payment);
     log(payment);
   } catch (err) {
@@ -194,16 +195,117 @@ function renderPayment(p) {
   } else if (p.type === "mobile_money") {
     html = rows(p.instructions);
   } else if (p.type === "card") {
-    html = `<div class="kv"><span>Card</span><span class="mono">${p.brand || ""} ${p.last4 ? "•••• " + p.last4 : ""}</span></div>` +
-           `<div class="kv"><span>Charge</span><span class="mono">${p.chargeId}</span></div>`;
+    $("result").innerHTML =
+      `<div class="kv"><span>Card</span><span class="mono">${p.brand || ""} ${p.last4 ? "•••• " + p.last4 : ""}</span></div>` +
+      `<div class="kv"><span>Charge</span><span class="mono">${p.chargeId || "—"}</span></div>`;
+    return renderStep(p.step, p);
   } else {
     html = rows(p);
   }
 
+  // non-card rails: the instructions are the whole story, then watch the charge
   $("result").innerHTML = html + `<div class="status dim" id="pollstatus">watching the charge…</div>`;
+  if (p.chargeId) poll(p.chargeId);
+}
 
-  const chargeId = p.chargeId;
-  if (chargeId) poll(chargeId);
+/**
+ * Render whatever the API asked for next. This is the whole point of the guided flow: the UI is a
+ * function of `step.action`, not a guess about which screen comes next.
+ */
+function renderStep(step, payment) {
+  const box = $("result");
+  if (!step) return;
+
+  if (step.action === "collect_otp") {
+    box.innerHTML += `
+      <label>Enter the code your bank sent</label>
+      <input id="otp" class="mono" inputmode="numeric" maxlength="8" placeholder="123456" />
+      <div class="row" style="margin-top:10px">
+        <button id="otpsubmit" class="primary">Verify</button>
+        ${step.canResend ? `<button id="otpresend">Resend code</button>` : ""}
+      </div>
+      <div class="status dim" id="otpstatus">${step.attempt > 1 ? "That code did not work. Try again." : ""}</div>`;
+    $("otpsubmit").onclick = () => submitOtp($("otp").value, false);
+    if ($("otpresend")) $("otpresend").onclick = () => submitOtp(undefined, true);
+    $("otp").focus();
+    return;
+  }
+
+  if (step.action === "collect_avs") {
+    box.innerHTML += `
+      <label>Billing address (your bank asked to verify it)</label>
+      <input id="avs1" placeholder="Street address" />
+      <div class="grid2">
+        <div><label>City</label><input id="avscity" /></div>
+        <div><label>State</label><input id="avsstate" /></div>
+      </div>
+      <label>Postal code</label><input id="avszip" class="mono" />
+      <button id="avssubmit" class="primary" style="margin-top:10px">Verify address</button>
+      <div class="status dim" id="avsstatus"></div>`;
+    $("avssubmit").onclick = async () => {
+      const res = await post("/api/pay/card/avs", {
+        token: state.token,
+        chargeId: step.chargeId,
+        address: { line1: $("avs1").value, city: $("avscity").value, state: $("avsstate").value, postal_code: $("avszip").value },
+      });
+      afterStep(res, payment);
+    };
+    return;
+  }
+
+  if (step.action === "redirect") {
+    box.innerHTML += `
+      <label>Your bank needs you to approve this payment</label>
+      <button id="gobank" class="primary" style="margin-top:10px">Continue to your bank</button>
+      <div class="status dim">You'll come back here when it's done.</div>`;
+    $("gobank").onclick = () => location.assign(step.url);
+    return;
+  }
+
+  if (step.action === "confirm_inline") {
+    box.innerHTML += `<div class="status dim">This rail returned a Stripe client_secret — confirm it with Stripe Elements in your own form.</div>`;
+    return;
+  }
+
+  const watching = document.createElement("div");
+  watching.className = "status dim";
+  watching.id = "pollstatus";
+  watching.textContent = "watching the charge…";
+  box.append(watching);
+  if (step.chargeId) poll(step.chargeId);
+}
+
+function afterStep(res, payment) {
+  if (res.error) {
+    const el = document.getElementById("otpstatus") || document.getElementById("avsstatus");
+    if (el) { el.className = "status bad"; el.textContent = res.detail || res.error; }
+    return;
+  }
+  // Re-render the card summary with the new step; a wrong code comes back as collect_otp again.
+  $("result").innerHTML =
+    `<div class="kv"><span>Card</span><span class="mono">${payment.brand || ""} ${payment.last4 ? "•••• " + payment.last4 : ""}</span></div>` +
+    `<div class="kv"><span>Charge</span><span class="mono">${res.step?.chargeId || payment.chargeId || "—"}</span></div>`;
+  renderStep(res.step, payment);
+}
+
+async function submitOtp(otp, resend) {
+  const status = document.getElementById("otpstatus");
+  if (status) { status.className = "status dim"; status.textContent = resend ? "sending a new code…" : "checking…"; }
+  const res = await post("/api/pay/card/otp", {
+    token: state.token,
+    chargeId: state.lastChargeId,
+    otp,
+    resend: Boolean(resend),
+  });
+  afterStep(res, { brand: "", last4: "", chargeId: state.lastChargeId });
+}
+
+async function post(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.json());
 }
 
 async function poll(chargeId) {

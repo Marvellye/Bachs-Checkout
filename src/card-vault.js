@@ -193,11 +193,52 @@ export class CardVault {
     return result ?? {};
   }
 
-  /** Submit the OTP the issuer asked for (`next_action.type === "requires_otp"`). */
-  authorizeOtp(body) { return this.action("authorizeCardStep", [this.token, body]); }
+  /* ---------------------------------------------------- verification steps */
 
-  /** Submit a card PIN when the issuer asks for one (`grant.collect_pin === true`). */
-  authorizePin(body) { return this.action("authorizePinViaVault", [this.token, body]); }
+  /**
+   * Answer an OTP challenge. The payload shape is what the hosted checkout sends:
+   * `{ charge_id, type: "otp", otp }`, or `{ charge_id, type: "resend_otp" }` for a resend.
+   *
+   * A wrong code is not an error: the response comes back with `status: "failed"` and a
+   * `next_action.type` of `requires_otp`, so the caller can re-prompt.
+   *
+   * @param {{chargeId: string, otp?: string, resend?: boolean}} input
+   */
+  authorizeOtp({ chargeId, otp, resend = false } = {}) {
+    if (!chargeId) throw new Error("authorizeOtp: chargeId is required");
+    if (!resend && !otp) throw new Error("authorizeOtp: otp is required (or pass resend: true)");
+    const payload = resend
+      ? { charge_id: chargeId, type: "resend_otp" }
+      : { charge_id: chargeId, type: "otp", otp: String(otp).trim() };
+    return this.action("authorizeCardStep", [this.token, payload]);
+  }
+
+  /**
+   * Answer an address-verification (AVS) challenge.
+   * @param {{chargeId: string, address: {line1: string, city: string, state: string, postal_code: string, country?: string}}} input
+   */
+  submitAvs({ chargeId, address } = {}) {
+    if (!chargeId) throw new Error("submitAvs: chargeId is required");
+    if (!address?.line1 || !address?.city || !address?.state || !address?.postal_code) {
+      throw new Error("submitAvs: address needs line1, city, state and postal_code");
+    }
+    return this.action("authorizeCardStep", [
+      this.token,
+      { charge_id: chargeId, type: "avs", address: { country: "NG", ...address } },
+    ]);
+  }
+
+  /**
+   * Submit a card PIN when the issuer asks for one after the charge (`requires_pin`).
+   *
+   * Signature inferred from the checkout build as `(chargeId, pin)` - unlike the OTP action this one
+   * does not take the checkout token. Unverified against a live issuer; see README caveats.
+   */
+  authorizePin({ chargeId, pin } = {}) {
+    if (!chargeId) throw new Error("authorizePin: chargeId is required");
+    if (!pin) throw new Error("authorizePin: pin is required");
+    return this.action("authorizePinViaVault", [chargeId, String(pin)]);
+  }
 }
 
 function normalizeYear(year) {
