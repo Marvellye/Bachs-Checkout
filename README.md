@@ -394,6 +394,10 @@ export async function POST(req) {
 }
 ```
 
+`npm run verify:pack` is the release gate: it packs the tarball, installs it into a temp directory and
+imports `bachs-checkout` plus `bachs-checkout/browser`, so a file missing from `files` or a broken
+`exports` map fails before publishing instead of after.
+
 `X-Bachs-Signature-V2` looks like `t=<unix>,v1=<hex>[,v1=<hex>]`: an HMAC-SHA256 over
 `"${timestamp}.${rawBody}"`, 300-second tolerance, multiple `v1` values while a secret is rotating.
 `Bachs.verifyWebhook(...)` handles all of it.
@@ -406,8 +410,9 @@ before assuming your handler is at fault.
 ## Testing
 
 ```bash
-npm test                 # 31 unit tests, no network, no credentials
+npm test                 # 58 unit tests, no network, no credentials
 npm run test:integration # real sandbox charges (needs BACHS_SECRET_KEY)
+npm run verify:pack      # pack, install clean, import every entry point
 ```
 
 The integration suite covers every rail and both card outcomes, and refuses to run with a `sk_live_`

@@ -34,7 +34,8 @@
     "discover": "node scripts/discover-actions.mjs",
     "live:check": "node scripts/live-check.mjs",
     "example": "node examples/server.mjs",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "verify:pack": "node scripts/verify-pack.mjs"
   },
   "keywords": [
     "bachs",

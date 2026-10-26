@@ -40,6 +40,8 @@ jobs:
           node-version: 22
       - name: npm pack (dry run)
         run: npm pack --dry-run
+      - name: Pack, install clean, import every entry
+        run: node scripts/verify-pack.mjs
       - name: Assert the tarball carries the runtime and no secrets
         run: |
           npm pack --silent > /dev/null
