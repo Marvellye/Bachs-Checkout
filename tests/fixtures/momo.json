@@ -1,0 +1,59 @@
+{
+  "requirements_step1": {
+    "status": "AWAITING_DATA",
+    "fields": [
+      {
+        "id": "payment_rail",
+        "label": "Select Network",
+        "type": "select",
+        "options": [
+          { "label": "MTN Mobile Money", "value": "mtn" },
+          { "label": "Vodafone Mobile Money", "value": "vodafone" }
+        ]
+      }
+    ],
+    "current_step": { "id": "collect_requirements", "type": "dynamic" },
+    "next_step": {
+      "id": "get_quote",
+      "type": "api",
+      "endpoint": "/checkouts/CKTOKEN/get-quote",
+      "inputs": ["payment_method", "currency", "payment_rail"]
+    }
+  },
+  "get_quote": {
+    "quote_id": "quote_momo_0001",
+    "payment_method": "MOMO_GHS",
+    "payment_rail": "mtn",
+    "base_amount_usd": "1.00",
+    "amount_local_base": "12.23",
+    "currency": "GHS",
+    "processing_fee": "0.43",
+    "exchange_rate": "12.2348100",
+    "total_amount": "12.23",
+    "payment_type": "deposit",
+    "expires_at": "2026-01-01T12:02:00.000000+00:00",
+    "customer_bears_fee": false,
+    "next_step": {
+      "id": "collect_requirements",
+      "type": "dynamic",
+      "endpoint": "/checkouts/CKTOKEN/requirements",
+      "inputs": ["phone_number"],
+      "requirements": [
+        { "id": "phone_number", "label": "Phone Number (in international format)", "type": "tel" }
+      ]
+    }
+  },
+  "complete": {
+    "payment_type": "instructions",
+    "charge_id": "ch_000000000000000000000000000momo",
+    "checkout_id": "chk_0000000000000003",
+    "transaction_id": "flw_tx_0000000000000000",
+    "instructions": {
+      "action": "approve_on_phone",
+      "message": "Approve the mobile money prompt"
+    },
+    "amount": "12.230000000000000000",
+    "currency": "GHS",
+    "polling_required": true
+  }
+}

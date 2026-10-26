@@ -1,0 +1,66 @@
+{
+  "get_quote": {
+    "quote_id": "quote_card_0001",
+    "payment_method": "USD_CARD",
+    "payment_rail": null,
+    "base_amount_usd": "1.00",
+    "amount_local_base": "1.00",
+    "currency": "USD",
+    "processing_fee": "0.45",
+    "exchange_rate": null,
+    "total_amount": "1.00",
+    "payment_type": "deposit",
+    "expires_at": "2026-01-01T12:02:00.000000+00:00",
+    "customer_bears_fee": false,
+    "next_step": {
+      "id": "complete_checkout",
+      "type": "api",
+      "endpoint": "/checkouts/CKTOKEN/complete",
+      "inputs": ["payment_method", "quote_id"],
+      "requirements": []
+    }
+  },
+  "complete_inline": {
+    "payment_type": "inline",
+    "client_secret": "pi_000000000000000000000000_secret_0000000000000000000000",
+    "transaction_id": "pi_000000000000000000000000",
+    "amount": "1.000000000000000000",
+    "currency": "USD",
+    "gateway_session_id": "pi_000000000000000000000000",
+    "charge_id": "ch_0000000000000000000000000card00"
+  },
+  "complete_processing": {
+    "payment_type": "processing",
+    "auth_model": null,
+    "next_action": null,
+    "charge_id": "ch_0000000000000000000000000card01",
+    "transaction_id": "flw_tx_0000000000000001",
+    "polling_required": true
+  },
+  "complete_requires_otp": {
+    "payment_type": "processing",
+    "auth_model": "OTP",
+    "next_action": { "type": "requires_otp", "can_resend": true },
+    "charge_id": "ch_0000000000000000000000000card02",
+    "transaction_id": "flw_tx_0000000000000002",
+    "polling_required": true
+  },
+  "charge_status_declined": {
+    "charge_id": "ch_0000000000000000000000000card01",
+    "charge_status": "open",
+    "substatus": "last_attempt_failed",
+    "checkout_status": "open",
+    "attempt_status": "failed",
+    "attempt_failed": true,
+    "failure_message": "The payment was declined. Try again or use another payment method.",
+    "failure_code": "bank_declined",
+    "redirect_url": null,
+    "amount_paid": "0.00",
+    "amount_remaining": "1.00"
+  },
+  "tokenize": {
+    "handle": "vlt_00000000000000000000000000000000",
+    "brand": "visa",
+    "last4": "4242"
+  }
+}

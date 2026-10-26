@@ -1,0 +1,71 @@
+{
+  "name": "bachs-checkout",
+  "version": "0.1.0",
+  "description": "Unofficial Bachs SDK: card, bank transfer, crypto and mobile money payments in your own UI, with no redirect.",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./browser": {
+      "types": "./src/browser.d.ts",
+      "default": "./src/browser.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test tests/unit.test.js",
+    "test:integration": "node --test tests/integration.test.js",
+    "test:all": "node --test tests/",
+    "postman:build": "python3 tools/build-postman.py",
+    "postman:smoke": "node scripts/postman-smoke.mjs",
+    "discover": "node scripts/discover-actions.mjs",
+    "live:check": "node scripts/live-check.mjs",
+    "example": "node examples/server.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "bachs",
+    "bachs.io",
+    "payments",
+    "checkout",
+    "sdk",
+    "card",
+    "bank-transfer",
+    "crypto",
+    "mobile-money",
+    "nigeria",
+    "africa",
+    "flutterwave",
+    "unofficial"
+  ],
+  "author": "Marvellous Ezekiel (https://github.com/Marvellye)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Marvellye/Bachs-Checkout.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Marvellye/Bachs-Checkout/issues"
+  },
+  "homepage": "https://github.com/Marvellye/Bachs-Checkout#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/Marvellye"
+  }
+}

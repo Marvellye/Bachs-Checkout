@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in the SDK does not behave as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste API keys, webhook secrets or real card numbers.** Redact ids and amounts.
+
+  - type: input
+    id: version
+    attributes:
+      label: bachs-checkout version
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: v22.11.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - sandbox
+        - live
+    validations:
+      required: true
+
+  - type: dropdown
+    id: rail
+    attributes:
+      label: Rail
+      options:
+        - card (USD)
+        - card (NGN)
+        - bank transfer
+        - crypto
+        - mobile money
+        - free / custom pricing
+        - not rail-specific
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the error `status`, `code` and `detail` if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A few lines of code, with ids and keys replaced.
+      render: javascript
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed all keys, secrets and real card data from this report
+          required: true
+        - label: I checked the Caveats section of the README
+          required: true

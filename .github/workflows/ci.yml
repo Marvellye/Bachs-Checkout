@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit tests (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install (no runtime dependencies)
+        run: npm install --no-audit --no-fund
+      - name: Unit tests
+        run: npm test
+      - name: Syntax check every module
+        run: |
+          for f in src/*.js scripts/*.mjs examples/*.mjs; do node --check "$f"; done
+
+  package:
+    name: package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm pack (dry run)
+        run: npm pack --dry-run
+      - name: Assert the tarball carries the runtime and no secrets
+        run: |
+          npm pack --silent > /dev/null
+          TARBALL=$(ls bachs-checkout-*.tgz)
+          echo "contents of $TARBALL:"
+          tar -tzf "$TARBALL"
+          test "$(tar -tzf "$TARBALL" | grep -c '^package/src/')" -ge 5 \
+            || { echo "src/ missing from the package"; exit 1; }
+          if tar -tzf "$TARBALL" | grep -qE '\.env|\.card\.json|node_modules|tests/'; then
+            echo "secrets or dev files leaked into the package"; exit 1
+          fi
+
+  postman:
+    name: postman collection builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate the collection from the published OpenAPI spec
+        run: python3 tools/build-postman.py --fetch
+      - name: Assert the collection parses and has the curated folders
+        run: |
+          node -e '
+            const c = require("./postman/Bachs-API.postman_collection.json");
+            const names = c.item.map((f) => f.name);
+            const required = [
+              "SDK Flow: create the payment",
+              "Custom UI: drive the checkout (public API)",
+              "Card vault (direct card data)",
+            ];
+            for (const r of required) {
+              if (!names.includes(r)) { console.error("missing folder:", r); process.exit(1); }
+            }
+            const total = c.item.reduce((n, f) => n + f.item.length, 0);
+            if (total < 100) { console.error("suspiciously small collection:", total); process.exit(1); }
+            console.log("collection ok:", c.item.length, "folders,", total, "requests");
+          '
+
+  integration:
+    # Sandbox charges. Requires a repository secret named BACHS_SANDBOX_KEY.
+    # Skipped automatically on forks and when the secret is not configured.
+    name: integration (sandbox)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check for the sandbox key
+        id: key
+        run: |
+          if [ -n "${{ secrets.BACHS_SANDBOX_KEY }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "BACHS_SANDBOX_KEY not set - skipping integration tests"
+          fi
+      - name: Integration tests
+        if: steps.key.outputs.present == 'true'
+        env:
+          BACHS_SECRET_KEY: ${{ secrets.BACHS_SANDBOX_KEY }}
+        run: npm run test:integration

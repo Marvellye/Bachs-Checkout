@@ -1,0 +1,44 @@
+{
+  "get_quote": {
+    "quote_id": "quote_crypto_0001",
+    "payment_method": "CRYPTO",
+    "payment_rail": null,
+    "base_amount_usd": "1.00",
+    "amount_local_base": "1.000000",
+    "currency": "USDT_TRC20",
+    "processing_fee": "0.015000",
+    "exchange_rate": "1.0",
+    "total_amount": "1.000000",
+    "payment_type": "deposit",
+    "expires_at": "2026-01-01T12:02:00.000000+00:00",
+    "customer_bears_fee": false,
+    "next_step": {
+      "id": "complete_checkout",
+      "type": "api",
+      "endpoint": "/checkouts/CKTOKEN/complete",
+      "inputs": ["payment_method", "quote_id"],
+      "requirements": []
+    }
+  },
+  "complete": {
+    "payment_type": "instructions",
+    "charge_id": "ch_00000000000000000000000000crypt",
+    "checkout_id": "chk_0000000000000002",
+    "transaction_id": "cc_ref_0000000000000000",
+    "instructions": {
+      "address": "T-TEST-CRYPTO-ADDRESS-DO-NOT-PAY0000",
+      "amount": "1.000000000000000000",
+      "currency": "USDT",
+      "network": "TRON",
+      "expires_at": "2026-01-01T13:00:00.000000+00:00",
+      "expires_in_minutes": 60,
+      "qr_code": "data:image/png;base64,AAAA"
+    },
+    "amount": "1.000000000000000000",
+    "currency": "USDT_TRC20",
+    "polling_required": true,
+    "address": null,
+    "qr_code": null,
+    "expires_in_minutes": null
+  }
+}

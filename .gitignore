@@ -1,0 +1,24 @@
+node_modules/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+
+# credentials
+.env
+.env.*
+!.env.example
+.env.live.example
+.card.json
+*.pem
+*.key
+
+# generated / fetched
+spec/bachs-openapi.json
+postman/Bachs-Sandbox.postman_environment.json
+postman/Bachs-Live.postman_environment.json
+package-lock.json
+
+# scratch
+tmp/
+.hermes/
