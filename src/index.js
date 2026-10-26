@@ -334,18 +334,31 @@ export function resolveRail({ rail = "card", currency } = {}) {
 export class CheckoutSession {
   /**
    * @param {string} token the last path segment of `checkout_url`
-   * @param {{apiBase?: string, checkoutOrigin?: string, timeoutMs?: number, cardActionIds?: Record<string,string>}} [opts]
+   * @param {{apiBase?: string, checkoutOrigin?: string, environment?: "live"|"sandbox",
+   *   timeoutMs?: number, cardActionIds?: Record<string,string>}} [opts]
    */
   constructor(token, {
-    apiBase = SANDBOX_API,
-    checkoutOrigin = SANDBOX_CHECKOUT,
+    apiBase,
+    checkoutOrigin,
+    environment,
     timeoutMs = 45000,
     cardActionIds = null,
   } = {}) {
     if (!token) throw new Error("token is required");
+
+    // A live token is only valid against the live API, so the pair has to move together.
+    // Callers pass `environment`, or an apiBase which already says which side it is; the bare
+    // default stays sandbox because that is what a test key produces.
+    const live = environment
+      ? String(environment).toLowerCase() === "live"
+      : apiBase
+        ? !String(apiBase).includes("sandbox")
+        : false;
+
     this.token = token;
-    this.apiBase = apiBase.replace(/\/+$/, "");
-    this.checkoutOrigin = checkoutOrigin.replace(/\/+$/, "");
+    this.environment = live ? "live" : "sandbox";
+    this.apiBase = (apiBase || (live ? LIVE_API : SANDBOX_API)).replace(/\/+$/, "");
+    this.checkoutOrigin = (checkoutOrigin || (live ? LIVE_CHECKOUT : SANDBOX_CHECKOUT)).replace(/\/+$/, "");
     this.timeoutMs = timeoutMs;
     // Production builds carry different server-action ids; pass discovered ones here.
     this.cardActionIds = cardActionIds;

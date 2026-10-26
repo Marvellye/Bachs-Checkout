@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.1
+
+### Fixed
+
+- `CheckoutSession` no longer assumes sandbox. A session built from a live key used to default
+  `apiBase` to `sandbox-api.bachs.io`, so every `/v1/public/checkouts/{token}` call answered
+  `UNAUTHORIZED: Invalid or expired checkout token` even though the token was valid. Pass
+  `environment: "live"`, or an `apiBase`, and the checkout origin follows it.
+- `CheckoutSession.fromUrl` now also reports `environment`, and is the recommended way to build a
+  session — the URL already knows which side it came from.
+
+### Added
+
+- `CheckoutSession#environment` — `"live"` or `"sandbox"`, so a UI can say which one it is on.
+
 ## [0.2.0] - 2026-10-26
 
 Card verification is now a first-class, server-guided flow instead of a documented gap.

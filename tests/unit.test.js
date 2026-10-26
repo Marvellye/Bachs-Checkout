@@ -21,6 +21,8 @@ import {
   isUncertainWrite,
   SANDBOX_API,
   LIVE_API,
+  SANDBOX_CHECKOUT,
+  LIVE_CHECKOUT,
 } from "../src/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -127,6 +129,46 @@ test("base URL follows the key prefix", () => {
   assert.equal(new Bachs({ secretKey: "sk_live_abc" }).baseUrl, LIVE_API);
   assert.equal(new Bachs({ secretKey: "sk_live_abc", baseUrl: "https://proxy.internal/" }).baseUrl,
     "https://proxy.internal");
+});
+
+test("a live session is redeemed against the live API, not sandbox", () => {
+  // Regression: a live key minted a live token, then the public endpoints defaulted to
+  // sandbox-api and the API answered UNAUTHORIZED / "Invalid or expired checkout token".
+  const live = new CheckoutSession("tok", { environment: "live" });
+  assert.equal(live.apiBase, LIVE_API);
+  assert.equal(live.checkoutOrigin, LIVE_CHECKOUT);
+  assert.equal(live.environment, "live");
+
+  const sandbox = new CheckoutSession("tok", { environment: "sandbox" });
+  assert.equal(sandbox.apiBase, SANDBOX_API);
+  assert.equal(sandbox.checkoutOrigin, SANDBOX_CHECKOUT);
+});
+
+test("the apiBase decides the pair when no environment is given", () => {
+  const live = new CheckoutSession("tok", { apiBase: LIVE_API });
+  assert.equal(live.environment, "live");
+  assert.equal(live.checkoutOrigin, LIVE_CHECKOUT, "checkout origin must follow the API");
+
+  const sandbox = new CheckoutSession("tok", { apiBase: SANDBOX_API });
+  assert.equal(sandbox.environment, "sandbox");
+  assert.equal(sandbox.checkoutOrigin, SANDBOX_CHECKOUT);
+});
+
+test("a bare CheckoutSession still defaults to sandbox", () => {
+  const bare = new CheckoutSession("tok");
+  assert.equal(bare.apiBase, SANDBOX_API);
+  assert.equal(bare.checkoutOrigin, SANDBOX_CHECKOUT);
+});
+
+test("fromUrl keeps the environment of the URL it was handed", () => {
+  const live = CheckoutSession.fromUrl("https://checkout.bachs.io/c/B_abc123");
+  assert.equal(live.token, "B_abc123");
+  assert.equal(live.apiBase, LIVE_API);
+  assert.equal(live.environment, "live");
+
+  const sandbox = CheckoutSession.fromUrl("https://sandbox-checkout.bachs.io/c/B_xyz789");
+  assert.equal(sandbox.apiBase, SANDBOX_API);
+  assert.equal(sandbox.environment, "sandbox");
 });
 
 /* ------------------------------------------------------------ normalising */
