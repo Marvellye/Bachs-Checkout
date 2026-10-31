@@ -35,6 +35,7 @@ npm install bachs-checkout
 - [Postman](#postman)
 - [API reference](#api-reference)
 - [Caveats](#caveats)
+- [SDK contract](./docs/SDK-CONTRACT.md) for ports to PHP, Python or anything else
 - [Contributing](#contributing)
 
 ---
