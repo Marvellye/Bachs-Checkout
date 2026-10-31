@@ -103,12 +103,21 @@ const COLLECT_ACTIONS = new Set(["collect_otp", "collect_pin", "collect_avs"]);
  * @param {number} [opts.maxAttempts]
  * @returns {Promise<{result: object, step: object, attempts: number, reason?: string}>}
  */
-export async function driveCardVerification({ vault, result, onVerification, maxAttempts = 3 }) {
+export async function driveCardVerification({
+  vault,
+  result,
+  onVerification,
+  onStep,
+  maxAttempts = 3,
+  chargeId: knownChargeId = null,
+}) {
   let current = result;
   let attempts = 0;
 
   for (;;) {
-    const step = nextCardStep(current);
+    // A challenge response does not always repeat charge_id; fall back to the one we already have
+    // rather than dropping the customer's answer on the floor.
+    const step = nextCardStep(current, { chargeId: knownChargeId });
     if (!COLLECT_ACTIONS.has(step.action)) return { result: current, step, attempts };
     if (attempts >= maxAttempts) {
       return { result: current, step, attempts, reason: "max_attempts" };
@@ -121,7 +130,16 @@ export async function driveCardVerification({ vault, result, onVerification, max
     }
 
     if (!step.chargeId) {
-      return { result: current, step: challenge, attempts, reason: "no_charge_id" };
+      // The answer arrived but there is nowhere to send it. Failing loudly beats a silent dead end
+      // where the customer typed a correct code and nothing happened.
+      const err = new Error(
+        "The issuer asked for verification, but no charge id was present to submit it against. " +
+          "Pass `chargeId` (the charge from /complete) so the answer has a target."
+      );
+      err.code = "VERIFICATION_NO_CHARGE_ID";
+      err.step = challenge;
+      err.response = current;
+      throw err;
     }
 
     attempts += 1;
@@ -141,6 +159,12 @@ export async function driveCardVerification({ vault, result, onVerification, max
     } else {
       const address = typeof answer === "string" ? { line1: answer } : answer.address ?? answer;
       current = await vault.submitAvs({ chargeId: step.chargeId, address });
+    }
+
+    // Hand the raw response back so a caller can log it. Diagnosing a rejected code is otherwise
+    // guesswork: the response says whether the code was wrong, expired, or already answered.
+    if (typeof onStep === "function") {
+      await onStep({ step: challenge, response: current });
     }
   }
 }

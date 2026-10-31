@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.5
+
+### Fixed
+
+- A verification answer could be swallowed. When a challenge response omitted `charge_id`,
+  `driveCardVerification` prompted the customer, received the code, then returned quietly without
+  submitting it. It now falls back to the charge id from `/complete`, and if there is still no
+  target it throws `VERIFICATION_NO_CHARGE_ID` with the step attached instead of silently waiting.
+
+### Added
+
+- `onStep({ step, response })` fires after every verification call with the raw API response, so a
+  rejected OTP can be diagnosed instead of guessed at. `driveCardVerification` accepts
+  `chargeId` as an explicit fallback target.
+
 ## 0.2.4
 
 ### Fixed

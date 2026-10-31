@@ -321,6 +321,10 @@ export type VerificationAnswer =
 export declare function driveCardVerification(opts: {
   vault: CardVault;
   result: CompleteResponse;
+  /** Fallback target for a verification answer when the response omits charge_id. */
+  chargeId?: string | null;
+  /** Called after each verification call with the raw response, for logging. */
+  onStep?: (input: { step: CardStep; response: CompleteResponse }) => void | Promise<void>;
   onVerification?: (challenge: CardStep & { attempt: number }) =>
     VerificationAnswer | Promise<VerificationAnswer>;
   maxAttempts?: number;

@@ -524,6 +524,7 @@ export class CheckoutSession {
     currency = "USD",
     cardOptions,
     onVerification,
+    onStep,
     maxVerificationAttempts = 3,
     waitForResult = false,
     waitOptions,
@@ -591,7 +592,9 @@ export class CheckoutSession {
       vault,
       result: first,
       onVerification,
+      onStep,
       maxAttempts: maxVerificationAttempts,
+      chargeId: first?.charge_id ?? null,
     });
 
     // The verification response is authoritative: it may clear `next_action` / `auth_model`, so

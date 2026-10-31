@@ -455,3 +455,63 @@ test("payCard explains itself when a sealed blob cannot carry a required PIN", a
     (err) => err.code === "PIN_REQUIRED" && /already sealed/.test(err.message)
   );
 });
+
+/* --------------------------------------------- verification answer routing */
+
+test("a verification answer with nowhere to go fails loudly instead of vanishing", async () => {
+  const vault = { authorizeOtp: async () => ({}) };
+  const challengeResponse = { payment_type: "processing", next_action: { type: "requires_otp" } };
+
+  await assert.rejects(
+    () =>
+      driveCardVerification({
+        vault,
+        result: challengeResponse,
+        onVerification: async () => ({ otp: "123456" }),
+      }),
+    (err) => err.code === "VERIFICATION_NO_CHARGE_ID" && err.step.action === "collect_otp"
+  );
+});
+
+test("a fallback charge id lets an OTP land when the response omits it", async () => {
+  const calls = [];
+  const vault = {
+    authorizeOtp: async (input) => {
+      calls.push(input);
+      return { payment_type: "processing", charge_id: "ch_fallback", polling_required: true };
+    },
+  };
+
+  const driven = await driveCardVerification({
+    vault,
+    result: { payment_type: "processing", next_action: { type: "requires_otp" } },
+    chargeId: "ch_fallback",
+    onVerification: async () => ({ otp: "654321" }),
+  });
+
+  assert.deepEqual(calls, [{ chargeId: "ch_fallback", otp: "654321" }]);
+  assert.equal(driven.step.action, "poll");
+});
+
+test("onStep reports the raw answer for every verification call", async () => {
+  const seen = [];
+  const vault = {
+    authorizeOtp: async () => ({
+      payment_type: "processing",
+      status: "failed",
+      next_action: { type: "requires_otp", can_resend: true },
+      failure_code: "invalid_otp",
+    }),
+  };
+
+  const driven = await driveCardVerification({
+    vault,
+    result: { payment_type: "processing", charge_id: "ch_1", next_action: { type: "requires_otp" } },
+    maxAttempts: 1,
+    onVerification: async () => ({ otp: "000000" }),
+    onStep: ({ step, response }) => seen.push({ action: step.action, code: response.failure_code }),
+  });
+
+  assert.deepEqual(seen, [{ action: "collect_otp", code: "invalid_otp" }]);
+  assert.equal(driven.step.action, "collect_otp", "a rejected code is a re-prompt, not a dead end");
+});
