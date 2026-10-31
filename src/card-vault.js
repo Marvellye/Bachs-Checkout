@@ -147,7 +147,7 @@ export class CardVault {
   }
 
   /** Seal locally, then tokenize. Returns a vault handle (`vlt_...`), brand and last4. */
-  async tokenize(card) {
+  async tokenize(card, options = {}) {
     const pem = await this.publicKey();
     const sealed = CardVault.seal(pem, {
       card_number: String(card.card_number ?? card.number ?? "").replace(/\s+/g, ""),
@@ -156,7 +156,26 @@ export class CardVault {
       cvv: String(card.cvv ?? card.cvc ?? ""),
       ...((card.cardholder_name || card.name) ? { cardholder_name: card.cardholder_name || card.name } : {}),
     }, card.pin);
-    return this.tokenizeSealed(sealed);
+    return this.tokenizeSealed(sealed, options);
+  }
+
+  /**
+   * Mint a tokenize grant. The hosted checkout calls this before sealing, because the response
+   * carries `collect_pin`: some issuers (most Nigerian cards) want the PIN inside the sealed
+   * payload, before the charge exists, not after it.
+   *
+   * @returns {Promise<{grant: string, collectPin: boolean, raw: object}>}
+   */
+  async mintGrant() {
+    const raw = await this.action("mintTokenizeGrant", [this.token]);
+    const grant = raw?.grant ?? raw?.[0]?.grant ?? null;
+    if (!grant) {
+      const err = new Error(`mintTokenizeGrant returned no grant: ${JSON.stringify(raw).slice(0, 300)}`);
+      err.code = "TOKENIZE_FAILED";
+      err.body = raw;
+      throw err;
+    }
+    return { grant, collectPin: raw?.collect_pin === true, raw };
   }
 
   /**
@@ -166,11 +185,13 @@ export class CardVault {
    *
    * @param {{encrypted_key: string, iv: string, ciphertext: string}} sealed
    */
-  async tokenizeSealed(sealed) {
+  async tokenizeSealed(sealed, { grant: existingGrant, collectPin: knownCollectPin = false } = {}) {
     if (!sealed?.ciphertext || !sealed?.encrypted_key || !sealed?.iv) {
       throw new Error("tokenizeSealed: expected { encrypted_key, iv, ciphertext }");
     }
-    const grant = await this.action("mintTokenizeGrant", [this.token]);
+    const grant = existingGrant
+      ? { grant: existingGrant, collect_pin: knownCollectPin }
+      : await this.action("mintTokenizeGrant", [this.token]);
     const tok = await this.action("tokenizeCardWithGrantRetry", [this.token, grant.grant, sealed]);
     const handle = tok?.handle ?? tok?.[0]?.handle;
     if (!handle) {

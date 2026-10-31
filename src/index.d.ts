@@ -562,6 +562,8 @@ export interface SealCardInput {
 }
 
 export declare class CardVault {
+  /** Mint a tokenize grant; `collectPin` says whether the PIN must be inside the sealed payload. */
+  mintGrant(): Promise<{ grant: string; collectPin: boolean; raw: any }>;
   constructor(opts: {
     token: string;
     checkoutOrigin?: string;
@@ -584,7 +586,8 @@ export declare class CardVault {
   tokenize(card: SealCardInput): Promise<{ handle: string; brand?: string; last4?: string; collectPin: boolean }>;
   /** Tokenize a payload sealed elsewhere (browser-side), so the server never sees a PAN. */
   tokenizeSealed(
-    sealed: { encrypted_key: string; iv: string; ciphertext: string }
+    sealed: { encrypted_key: string; iv: string; ciphertext: string },
+    opts?: { grant?: string; collectPin?: boolean }
   ): Promise<{ handle: string; brand?: string; last4?: string; collectPin: boolean }>;
   complete(input: { handle: string; quoteId: string; deviceInformation?: Record<string, unknown> }): Promise<CompleteResponse>;
   authorizeOtp(input: { chargeId: string; otp?: string; resend?: boolean }): Promise<any>;

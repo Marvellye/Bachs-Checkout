@@ -534,7 +534,52 @@ export class CheckoutSession {
     const quote = await this.quote({ paymentMethod: rail.paymentMethod, currency: rail.currency });
 
     const vault = this.#vault();
-    const { handle } = card.sealed ? await vault.tokenizeSealed(card.sealed) : await vault.tokenize(card);
+
+    // The grant announces `collect_pin` before any card data is sealed. Most Nigerian issuers
+    // want the PIN inside the sealed payload, before a charge exists, which is a different flow
+    // from the post-charge PIN challenge that authorizePin answers.
+    const grant = await vault.mintGrant();
+    let pin = cardOptions?.pin ?? null;
+
+    if (grant.collectPin && !pin) {
+      const challenge = {
+        action: "collect_pin",
+        phase: "before_sealing",
+        chargeId: null,
+        attempt: 1,
+        canResend: false,
+      };
+
+      // A sealed blob is opaque, so there is nothing to ask the customer for: the caller has to
+      // re-seal with the PIN. Say that plainly instead of prompting for a code that cannot be used.
+      if (card.sealed) {
+        const err = new Error(
+          "payCard: this issuer wants the PIN inside the sealed card, but the card arrived already " +
+            "sealed. Seal it with the PIN (browser: sealCard(pem, card, pin)) and pass that blob, " +
+            "or pass cardOptions.pin to confirm the blob already contains it."
+        );
+        err.code = "PIN_REQUIRED";
+        err.step = challenge;
+        throw err;
+      }
+
+      const answer = await onVerification?.(challenge);
+      pin = typeof answer === "string" ? answer : answer?.pin ?? null;
+
+      if (!pin) {
+        const err = new Error(
+          "This issuer wants the card PIN inside the sealed payload, before the charge exists. " +
+            "Pass cardOptions.pin, or answer the collect_pin challenge from onVerification."
+        );
+        err.code = "PIN_REQUIRED";
+        err.step = challenge;
+        throw err;
+      }
+    }
+
+    const handle = card.sealed
+      ? (await vault.tokenizeSealed(card.sealed, { grant: grant.grant, collectPin: grant.collectPin })).handle
+      : (await vault.tokenize(pin ? { ...card, pin } : card, { grant: grant.grant, collectPin: grant.collectPin })).handle;
 
     const first = await vault.complete({
       handle,

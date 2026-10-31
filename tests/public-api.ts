@@ -77,6 +77,11 @@ void floor;
 
 const vault = new CardVault({ token: "B_token", checkoutOrigin: SANDBOX_CHECKOUT });
 void vault.publicKey();
+void vault.mintGrant().then((g) => g.collectPin);
+void vault.tokenizeSealed(
+  { encrypted_key: "k", iv: "i", ciphertext: "c" },
+  { grant: "g", collectPin: true }
+);
 void vault.tokenize({
   card_number: "4242424242424242",
   expiry_month: 9,

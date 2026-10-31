@@ -4,7 +4,7 @@
  *
  *   npm test
  */
-import test from "node:test";
+import test, { beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -264,6 +264,16 @@ test("driveCardVerification returns immediately when nothing is challenged", asy
 
 /* --------------------------------------------------- session orchestration */
 
+// payCard mints a grant before sealing, because that response announces `collect_pin`. Keep the
+// tests off the network by default; the PIN tests below override it.
+const realMintGrant = CardVault.prototype.mintGrant;
+beforeEach(() => {
+  CardVault.prototype.mintGrant = async () => ({ grant: "grant_test", collectPin: false });
+});
+afterEach(() => {
+  CardVault.prototype.mintGrant = realMintGrant;
+});
+
 test("payCard drives verification and waits for the outcome", async () => {
   const checkout = new CheckoutSession("TOK", { cardActionIds: {} });
   checkout.quote = async () => ({ quote_id: "q1", total_amount: "1.00", currency: "USD" });
@@ -372,4 +382,76 @@ test("BachsError surfaces a failed verification", () => {
   const err = new BachsError(400, { detail: "Invalid OTP", error_code: "INVALID_OTP" }, "authorizeCardStep");
   assert.equal(err.code, "INVALID_OTP");
   assert.match(err.message, /Invalid OTP/);
+});
+
+/* ------------------------------------------------ pin before sealing (live) */
+
+test("payCard asks for the PIN before sealing when the build demands one", async () => {
+  const checkout = new CheckoutSession("TOK", { cardActionIds: {} });
+  checkout.quote = async () => ({ quote_id: "q1", total_amount: "1.00", currency: "USD" });
+
+  const originalTokenize = CardVault.prototype.tokenize;
+  const originalComplete = CardVault.prototype.complete;
+  let pinPassedToSeal;
+  const challenges = [];
+  try {
+    CardVault.prototype.mintGrant = async () => ({ grant: "grant_pin", collectPin: true });
+    CardVault.prototype.tokenize = async (input) => {
+      pinPassedToSeal = input.pin;
+      return { handle: "vlt_pin", brand: "verve", last4: "4904" };
+    };
+    CardVault.prototype.complete = async () => ({
+      payment_type: "processing",
+      charge_id: "ch_pin",
+      status: "processing",
+    });
+
+    const payment = await checkout.payCard({
+      card: { card_number: "5060991550000000000", expiry_month: 9, expiry_year: 2030, cvv: "111" },
+      currency: "NGN",
+      onVerification: async (challenge) => {
+        challenges.push(challenge);
+        if (challenge.action === "collect_pin") return { pin: "1234" };
+        return null;
+      },
+    });
+
+    assert.equal(pinPassedToSeal, "1234", "the PIN must be sealed with the card, not sent later");
+    assert.equal(challenges[0].action, "collect_pin");
+    assert.equal(challenges[0].phase, "before_sealing");
+    assert.equal(payment.chargeId, "ch_pin");
+  } finally {
+    CardVault.prototype.tokenize = originalTokenize;
+    CardVault.prototype.complete = originalComplete;
+  }
+});
+
+test("payCard refuses to guess when the PIN is needed but no handler answers", async () => {
+  const checkout = new CheckoutSession("TOK", { cardActionIds: {} });
+  checkout.quote = async () => ({ quote_id: "q1", total_amount: "1.00", currency: "USD" });
+  CardVault.prototype.mintGrant = async () => ({ grant: "grant_pin", collectPin: true });
+
+  await assert.rejects(
+    () =>
+      checkout.payCard({
+        card: { card_number: "5060991550000000000", expiry_month: 9, expiry_year: 2030, cvv: "111" },
+        currency: "NGN",
+      }),
+    (err) => err.code === "PIN_REQUIRED" && err.step?.phase === "before_sealing"
+  );
+});
+
+test("payCard explains itself when a sealed blob cannot carry a required PIN", async () => {
+  const checkout = new CheckoutSession("TOK", { cardActionIds: {} });
+  checkout.quote = async () => ({ quote_id: "q1", total_amount: "1.00", currency: "USD" });
+  CardVault.prototype.mintGrant = async () => ({ grant: "grant_pin", collectPin: true });
+
+  await assert.rejects(
+    () =>
+      checkout.payCard({
+        card: { sealed: { encrypted_key: "k", iv: "i", ciphertext: "c" } },
+        currency: "NGN",
+      }),
+    (err) => err.code === "PIN_REQUIRED" && /already sealed/.test(err.message)
+  );
 });

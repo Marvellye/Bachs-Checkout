@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.4
+
+### Fixed
+
+- Documented cards could not be charged on live at all. The checkout build asks for the card PIN
+  **before** the card is sealed, by answering `collect_pin: true` on `mintTokenizeGrant`, and
+  expects it inside the encrypted payload. `payCard()` ignored that flag, sealed without a PIN, and
+  completed into a charge the issuer would never authorise. This is the normal path for Nigerian
+  issuers; live answers `collect_pin: true` for both NGN and USD sessions.
+
+### Added
+
+- `CardVault#mintGrant()` returns `{ grant, collectPin }` so a UI can ask for the PIN before
+  sealing, which is what the hosted checkout does.
+- `payCard({ card, cardOptions: { pin } })` puts the PIN inside the seal, and `onVerification`
+  receives a `collect_pin` challenge with `phase: "before_sealing"` when none was supplied. If a
+  caller passes an already-sealed blob while the build wants a PIN, it throws `PIN_REQUIRED` with
+  the step attached rather than sending a charge that cannot succeed.
+- `tokenizeSealed(sealed, { grant, collectPin })` reuses a grant instead of minting a second one.
+
 ## 0.2.3
 
 ### Fixed

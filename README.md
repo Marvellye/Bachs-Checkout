@@ -267,6 +267,29 @@ const { handle } = await vault.tokenizeSealed(req.body.sealed);
 const result = await vault.complete({ handle, quoteId, deviceInformation: req.body.device });
 ```
 
+### Cards that want the PIN before the charge
+
+Most Nigerian issuers do. The build tells you up front: `mintTokenizeGrant` answers
+`collect_pin: true`, and the PIN must be inside the sealed payload, not sent afterwards.
+
+```js
+const vault = new CardVault({ token, checkoutOrigin, actionIds });
+
+const { grant, collectPin } = await vault.mintGrant();
+const pin = collectPin ? await askTheCustomerForTheirPin() : undefined;
+
+const sealed = CardVault.seal(await vault.publicKey(), card, pin);
+const { handle } = await vault.tokenizeSealed(sealed, { grant, collectPin });
+const first = await vault.complete({ handle, quoteId });
+
+// later challenges (OTP, AVS) come back as next_action and are driven the same way
+```
+
+`payCard()` does this for you when you pass the raw card: give it `cardOptions.pin`, or answer the
+`collect_pin` challenge it sends to `onVerification` (the step carries `phase: "before_sealing"`).
+If the card arrives already sealed while the build wants a PIN, it fails with `PIN_REQUIRED` instead
+of sending a charge that cannot succeed. Live answers `collect_pin: true` on both NGN and USD.
+
 ### The action ids are per build
 
 The vault's server-action ids belong to whichever checkout build is deployed. All six differ between

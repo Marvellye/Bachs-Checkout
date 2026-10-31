@@ -109,7 +109,15 @@ Browser or server, the payload is identical:
 3. Wrap the AES key with RSA-OAEP-SHA256.
 4. Send `{ encrypted_key, iv, ciphertext }`, base64, and nothing else.
 
-PIN sealing wraps the PIN itself, and the field is `pin` rather than a card object.
+**The PIN goes inside the card payload when `collect_pin` is true.** Observed in the live bundle and
+confirmed against the live API: `mintTokenizeGrant` returns `{ grant, expires_in, collect_pin }`, and
+live answers `collect_pin: true` for both NGN and USD sessions. The hosted checkout then seals
+`{...card, pin}` as one payload. A port that seals the card without the PIN and completes anyway
+creates a charge the issuer will not authorise.
+
+There is also a rarer post-charge path: if a charge comes back asking for a PIN that was not
+collected up front, `authorizePinViaVault` takes `(chargeId, pin)` with the PIN in clear. Handle
+`collect_pin` on the grant first; treat this as the fallback.
 
 Do not send a PAN to your own server. If a language cannot do RSA-OAEP-SHA256 and AES-256-GCM,
 it cannot host this SDK's card path, and should say so rather than shipping a weaker option.
@@ -182,6 +190,7 @@ client injectable so tests need no network.
 - [ ] `Idempotency-Key` on every write.
 - [ ] `normalise` returns the five `type` values, with `null` fields preserved rather than omitted.
 - [ ] Card sealing produces `{encrypted_key, iv, ciphertext}` that the vault accepts.
+- [ ] `collect_pin` from `mintTokenizeGrant` is honoured: the PIN is sealed inside the card payload.
 - [ ] `discoverCardActions` / `refreshCardActions` exist and resolve 6/6 ids on a live token.
 - [ ] `ACTION_STALE` is surfaced with that exact code so a caller can refresh and retry.
 - [ ] `nextCardStep` handles all seven actions and never throws on junk.

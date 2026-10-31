@@ -438,3 +438,43 @@ test("every action the vault calls has a name in the discovery list", () => {
     assert.ok(CARD_ACTION_NAMES.includes(name), `${name} missing from CARD_ACTION_NAMES`);
   }
 });
+
+/* ------------------------------------------------ pin-before-sealing (live) */
+
+test("mintGrant surfaces collect_pin, which live answers for both rails", async () => {
+  const vault = new CardVault({ token: "t", checkoutOrigin: SANDBOX_CHECKOUT });
+  vault.action = async (name) => {
+    assert.equal(name, "mintTokenizeGrant");
+    return { grant: "grant_1", expires_in: 900, collect_pin: true };
+  };
+  const result = await vault.mintGrant();
+  assert.equal(result.grant, "grant_1");
+  assert.equal(result.collectPin, true);
+});
+
+test("mintGrant reports no PIN when the build does not ask for one", async () => {
+  const vault = new CardVault({ token: "t", checkoutOrigin: SANDBOX_CHECKOUT });
+  vault.action = async () => ({ grant: "grant_2" });
+  const result = await vault.mintGrant();
+  assert.equal(result.collectPin, false, "absent collect_pin must not throw or leak undefined");
+});
+
+test("mintGrant fails loudly when the build returns no grant", async () => {
+  const vault = new CardVault({ token: "t", checkoutOrigin: SANDBOX_CHECKOUT });
+  vault.action = async () => ({});
+  await assert.rejects(() => vault.mintGrant(), (err) => err.code === "TOKENIZE_FAILED");
+});
+
+test("tokenizing with a pre-minted grant does not mint a second one", async () => {
+  const vault = new CardVault({ token: "t", checkoutOrigin: SANDBOX_CHECKOUT });
+  const calls = [];
+  vault.action = async (name) => {
+    calls.push(name);
+    return { handle: "vlt_1" };
+  };
+  const sealed = { encrypted_key: "k", iv: "i", ciphertext: "c" };
+  const result = await vault.tokenizeSealed(sealed, { grant: "grant_3", collectPin: true });
+  assert.deepEqual(calls, ["tokenizeCardWithGrantRetry"]);
+  assert.equal(result.handle, "vlt_1");
+  assert.equal(result.collectPin, true);
+});
