@@ -26,6 +26,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Unit tests
         run: npm test
+      - name: Type check the public API
+        run: npm run typecheck
       - name: Syntax check every module
         run: |
           for f in src/*.js scripts/*.mjs examples/*.mjs; do node --check "$f"; done

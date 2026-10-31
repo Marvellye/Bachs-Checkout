@@ -410,7 +410,8 @@ before assuming your handler is at fault.
 ## Testing
 
 ```bash
-npm test                 # 58 unit tests, no network, no credentials
+npm test                 # 62 unit tests, no network, no credentials
+npm run typecheck        # the .d.ts, compiled under --strict
 npm run test:integration # real sandbox charges (needs BACHS_SECRET_KEY)
 npm run verify:pack      # pack, install clean, import every entry point
 ```
@@ -493,10 +494,12 @@ npm run postman:smoke custom  # buyer-chosen amount
 
 Static: `verifyWebhook`, `constructEvent`. Helpers: `isUncertainWrite(err)`.
 
-### `new CheckoutSession(token, { apiBase?, checkoutOrigin?, cardActionIds? })`
+### `new CheckoutSession(token, { apiBase?, checkoutOrigin?, environment?, cardActionIds? })`
 
 No secret key required. `CheckoutSession.fromUrl(checkoutUrl)` derives everything, including
-sandbox vs live.
+sandbox vs live. If you build one from a bare token, pass `environment: "live"` (or an `apiBase`):
+the default is sandbox, and a live token redeemed on the sandbox API answers
+`UNAUTHORIZED: Invalid or expired checkout token`.
 
 `detail()`, `requirements()`, `quote()`, `complete()`, `setAmount()`, `chargeStatus()`,
 `authorizeMobileMoney()`, `confirmPayment()`, `pay()`, `waitForPayment()`.
@@ -504,7 +507,7 @@ sandbox vs live.
 ### `new CardVault({ token, checkoutOrigin?, actionIds? })`
 
 `publicKey()`, `tokenize(card)`, `tokenizeSealed(sealed)`, `complete({ handle, quoteId })`,
-`authorizeOtp()`, `authorizePin()`. Static `seal(pem, card)`.
+`authorizeOtp()`, `submitAvs()`, `authorizePin()`. Static `seal(pem, card, pin?)`.
 
 ### Errors
 

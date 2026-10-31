@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.2
+
+### Fixed
+
+- The shipped `index.d.ts` did not know about `CheckoutSession#environment` or the `environment`
+  option added in 0.2.1, so TypeScript users had to cast to reach it. Types and code now agree.
+
+### Added
+
+- `npm run typecheck` compiles `tests/public-api.ts` under `--strict`. Every export and option the
+  README documents is exercised there, so a type can no longer drift from the implementation. It
+  runs in CI on every Node version and blocks `npm publish`.
+
 ## 0.2.1
 
 ### Fixed

@@ -366,6 +366,8 @@ export declare class CheckoutSession {
     opts?: {
       apiBase?: string;
       checkoutOrigin?: string;
+      /** Picks the API and checkout hosts together. Inferred from `apiBase` when omitted. */
+      environment?: "live" | "sandbox";
       timeoutMs?: number;
       cardActionIds?: Record<string, string>;
     }
@@ -373,6 +375,7 @@ export declare class CheckoutSession {
   static fromUrl(checkoutUrl: string): CheckoutSession;
 
   token: string;
+  environment: "live" | "sandbox";
   apiBase: string;
   checkoutOrigin: string;
   cardActionIds: Record<string, string> | null;
