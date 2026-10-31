@@ -23,6 +23,10 @@ import {
   LIVE_API,
   SANDBOX_CHECKOUT,
   LIVE_CHECKOUT,
+  parseActionIds,
+  parseChunkRefs,
+  CARD_ACTION_NAMES,
+  KNOWN_CARD_ACTIONS,
 } from "../src/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -394,4 +398,43 @@ test("currency floors are declared for every rail currency", () => {
   }
   assert.equal(MIN_AMOUNT.NGN, 100);
   assert.equal(MIN_AMOUNT.USD, 1);
+});
+
+/* --------------------------------------------------- action-id discovery */
+
+test("parseActionIds reads both bundled and escaped call forms", () => {
+  const plain = 'createServerReference)("401e47952554c1841a2eea4c949c0d9a2bc472aabb","mintTokenizeGrant")';
+  const escaped = 'createServerReference)(\\"70008f5fa5e47a0ac1ecaf0bd9276d63aed5d690a9\\",\\"tokenizeCardWithGrantRetry\\")';
+
+  assert.equal(parseActionIds(plain).mintTokenizeGrant, "401e47952554c1841a2eea4c949c0d9a2bc472aabb");
+  assert.equal(parseActionIds(escaped).tokenizeCardWithGrantRetry,
+    "70008f5fa5e47a0ac1ecaf0bd9276d63aed5d690a9");
+});
+
+test("parseActionIds ignores names the vault does not use", () => {
+  const body = 'createServerReference)("401e47952554c1841a2eea4c949c0d9a2bc472aabb","loadSomethingElse")';
+  assert.deepEqual(parseActionIds(body), {});
+});
+
+test("parseActionIds keeps the first id when a chunk repeats a name", () => {
+  const body = [
+    'createServerReference)("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","completeCardCheckout")',
+    'createServerReference)("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","completeCardCheckout")',
+  ].join("\n");
+  assert.equal(parseActionIds(body).completeCardCheckout, "a".repeat(40));
+});
+
+test("parseChunkRefs dedupes and handles both reference shapes", () => {
+  const body = [
+    'src="/_next/static/chunks/08xp626_4.2o3.js"',
+    'static/chunks/08xp626_4.2o3.js',
+    "static/chunks/0zrut.e.tdrxb.js",
+  ].join(" ");
+  assert.deepEqual(parseChunkRefs(body).sort(), ["08xp626_4.2o3.js", "0zrut.e.tdrxb.js"]);
+});
+
+test("every action the vault calls has a name in the discovery list", () => {
+  for (const name of Object.keys(KNOWN_CARD_ACTIONS)) {
+    assert.ok(CARD_ACTION_NAMES.includes(name), `${name} missing from CARD_ACTION_NAMES`);
+  }
 });

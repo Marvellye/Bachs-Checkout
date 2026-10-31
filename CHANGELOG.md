@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.3
+
+### Fixed
+
+- Live card charges failed with `ACTION_STALE` on the first vault call. The card-vault server-action
+  ids are per checkout build, and all six differ between sandbox and live, so the sandbox constants
+  baked into `KNOWN_CARD_ACTIONS` were useless on a live session. Discovery is now part of the
+  package instead of a script you had to remember to run.
+
+### Added
+
+- `discoverCardActions(checkoutOrigin, token)` crawls the public checkout bundle for the six ids.
+- `CheckoutSession#refreshCardActions()` resolves them for the session's own build and stores them,
+  so the next `payCard()` uses the right ones.
+- `parseActionIds()` and `parseChunkRefs()` are exported as pure functions, so ports and tests can
+  reuse the parsing without the network.
+- `scripts/discover-actions.mjs` is now a thin CLI wrapper over the packaged implementation.
+
 ## 0.2.2
 
 ### Fixed

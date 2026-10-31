@@ -16,6 +16,9 @@
 
 import crypto from "node:crypto";
 import { CardVault, KNOWN_CARD_ACTIONS } from "./card-vault.js";
+import { discoverCardActions } from "./discover.js";
+
+export { discoverCardActions, parseActionIds, parseChunkRefs, CARD_ACTION_NAMES } from "./discover.js";
 import { nextCardStep, driveCardVerification, cardChallenge, AVS_FIELDS } from "./card-verification.js";
 
 export const SANDBOX_API = "https://sandbox-api.bachs.io";
@@ -374,6 +377,16 @@ export class CheckoutSession {
       apiBase: isSandbox ? SANDBOX_API : LIVE_API,
       checkoutOrigin: `${u.protocol}//${u.hostname}`,
     });
+  }
+
+  /**
+   * Resolve the card-vault action ids for this session's own build. Sandbox and live differ, and a
+   * redeploy rotates them, so call this before a card charge rather than trusting the constants.
+   */
+  async refreshCardActions({ maxChunks } = {}) {
+    const result = await discoverCardActions(this.checkoutOrigin, this.token, maxChunks ? { maxChunks } : {});
+    this.cardActionIds = { ...(this.cardActionIds || {}), ...result.ids };
+    return { ...result, checkoutOrigin: this.checkoutOrigin };
   }
 
   /** The vault for this session, carrying any discovered action ids. */

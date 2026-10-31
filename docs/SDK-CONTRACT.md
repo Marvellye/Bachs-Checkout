@@ -125,8 +125,18 @@ callback. A rejected OTP is a re-prompt, not a dead end, and the loop is bounded
 
 The vault's server-action ids (`mintTokenizeGrant`, `tokenizeCardWithGrantRetry`,
 `completeCardCheckout`, `authorizeCardStep`, `authorizePinViaVault`, `pollChargeStatus`) are per
-build. Resolve them at runtime by crawling `/_next/static/chunks/*.js`; never hardcode. This is what
-`scripts/discover-actions.mjs` does, with a bounded BFS.
+build, and **all six differ between sandbox and live**. Resolve them at runtime by crawling
+`/_next/static/chunks/*.js` for `createServerReference` calls; never hardcode, and never ship
+sandbox ids as a live fallback.
+
+The JS SDK exposes this as `discoverCardActions(checkoutOrigin, token)` plus
+`CheckoutSession#refreshCardActions()`. Ports must implement the same two, with the same names,
+because a port without it cannot charge a live card at all. Bound the crawl (250 chunks, 8 at a
+time), stop once all six are found, and surface `ACTION_STALE` when a request still 404s so callers
+can refresh and retry once.
+
+Both bundled and escaped call forms occur in the same bundle, so match:
+`createServerReference)(" <20-64 hex> ", " <actionName> ")` with optional backslashes before the quotes.
 
 ## 8. Errors
 
@@ -172,6 +182,8 @@ client injectable so tests need no network.
 - [ ] `Idempotency-Key` on every write.
 - [ ] `normalise` returns the five `type` values, with `null` fields preserved rather than omitted.
 - [ ] Card sealing produces `{encrypted_key, iv, ciphertext}` that the vault accepts.
+- [ ] `discoverCardActions` / `refreshCardActions` exist and resolve 6/6 ids on a live token.
+- [ ] `ACTION_STALE` is surfaced with that exact code so a caller can refresh and retry.
 - [ ] `nextCardStep` handles all seven actions and never throws on junk.
 - [ ] Error type carries `status`, `code`, `detail`, `body`; `isUncertainWrite` matches.
 - [ ] Webhook verification works against raw bytes, rotation, and a stale timestamp.

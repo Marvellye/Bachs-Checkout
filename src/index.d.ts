@@ -360,6 +360,26 @@ export declare function normalise(
   quote?: QuoteResponse | null
 ): NormalisedPayment;
 
+export declare const CARD_ACTION_NAMES: readonly string[];
+
+/** Pure: action ids declared in one bundled chunk. */
+export declare function parseActionIds(body: string): Record<string, string>;
+
+/** Pure: chunk filenames referenced by a page or another chunk. */
+export declare function parseChunkRefs(body: string): string[];
+
+/** Crawl a checkout build for the card-vault action ids. Resolves per environment and per deploy. */
+export declare function discoverCardActions(
+  checkoutOrigin: string,
+  token: string,
+  opts?: { maxChunks?: number; concurrency?: number }
+): Promise<{
+  ids: Record<string, string>;
+  chunks: Record<string, string>;
+  crawled: number;
+  missing: string[];
+}>;
+
 export declare class CheckoutSession {
   constructor(
     token: string,
@@ -373,6 +393,15 @@ export declare class CheckoutSession {
     }
   );
   static fromUrl(checkoutUrl: string): CheckoutSession;
+
+  /** Resolve this build's card-vault action ids and remember them for later calls. */
+  refreshCardActions(opts?: { maxChunks?: number }): Promise<{
+    ids: Record<string, string>;
+    chunks: Record<string, string>;
+    crawled: number;
+    missing: string[];
+    checkoutOrigin: string;
+  }>;
 
   token: string;
   environment: "live" | "sandbox";

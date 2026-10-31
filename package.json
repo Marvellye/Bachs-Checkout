@@ -1,6 +1,6 @@
 {
   "name": "bachs-checkout",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Unofficial Bachs SDK: card, bank transfer, crypto and mobile money payments in your own UI, with no redirect.",
   "type": "module",
   "main": "./src/index.js",

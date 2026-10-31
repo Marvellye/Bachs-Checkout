@@ -269,16 +269,27 @@ const result = await vault.complete({ handle, quoteId, deviceInformation: req.bo
 
 ### The action ids are per build
 
-The vault's server-action ids belong to whichever checkout build is deployed. Production differs
-from sandbox, so resolve them rather than trusting constants:
+The vault's server-action ids belong to whichever checkout build is deployed. All six differ between
+sandbox and live, and a redeploy can rotate them, so resolve them rather than trusting constants:
+
+```js
+const checkout = CheckoutSession.fromUrl(session.checkout_url);
+const { ids, crawled, missing } = await checkout.refreshCardActions();
+// 6/6 resolved from 16 chunks on a live session, ~2s
+```
+
+Or from the shell:
 
 ```bash
 node scripts/discover-actions.mjs https://checkout.bachs.io <checkout-token>
 ```
 
-Then pass them in: `new CheckoutSession(token, { cardActionIds })` or `new CardVault({ token, actionIds })`.
-`scripts/live-check.mjs` does this automatically. If a build moves underneath you, requests fail with
-`err.code === "ACTION_STALE"` instead of a mystery 404.
+The resolved ids live on the session, so the next `payCard()` uses them. `new CheckoutSession(token,
+{ cardActionIds })` and `new CardVault({ token, actionIds })` still accept them by hand.
+
+If a build moves underneath you mid-flight, the vault throws `err.code === "ACTION_STALE"` instead of
+a mystery 404: call `refreshCardActions()` again and retry once. A sandbox session can keep using the
+bundled constants; a live session cannot, because none of them match.
 
 ### If the rail is `inline` instead
 

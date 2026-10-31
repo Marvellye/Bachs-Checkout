@@ -22,6 +22,10 @@ import {
   SANDBOX_CHECKOUT,
   LIVE_CHECKOUT,
   AVS_FIELDS,
+  discoverCardActions,
+  parseActionIds,
+  parseChunkRefs,
+  CARD_ACTION_NAMES,
 } from "../src/index.js";
 
 import { sealCard, deviceInformation, fetchVaultKey, mountCardForm } from "../src/browser.js";
@@ -50,7 +54,17 @@ void environment, apiBase, checkoutOrigin;
 // `apiBase` alone must also be accepted, and the token-only form must stay valid.
 new CheckoutSession("B_token", { apiBase: LIVE_API });
 new CheckoutSession("B_token");
-CheckoutSession.fromUrl("https://checkout.bachs.io/c/B_token");
+const fromUrl: CheckoutSession = CheckoutSession.fromUrl("https://checkout.bachs.io/c/B_token");
+
+// A live build carries different action ids, so a session resolves its own before charging.
+const refreshed: Promise<{ ids: Record<string, string>; missing: string[] }> = fromUrl.refreshCardActions();
+void refreshed;
+
+const discovered = discoverCardActions(LIVE_CHECKOUT, "B_token", { maxChunks: 50 });
+void discovered;
+void parseActionIds("chunk body");
+void parseChunkRefs("chunk body");
+void CARD_ACTION_NAMES.length;
 
 const rail = resolveRail({ rail: "momo_ghs" });
 const railCurrency: string = rail.currency;
