@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.6
+
+### Added
+
+- `onStep` also fires for the `/complete` answer, which is where `auth_model` and the first
+  `next_action` come from. Without it a caller could see the OTP challenge but never the reason the
+  charge was raised.
+
 ## 0.2.5
 
 ### Fixed

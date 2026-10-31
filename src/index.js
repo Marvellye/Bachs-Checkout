@@ -588,6 +588,12 @@ export class CheckoutSession {
       deviceInformation: cardOptions?.deviceInformation,
     });
 
+    if (typeof onStep === "function") {
+      // The completion answer is the one that names the challenge (auth_model / next_action), so a
+      // caller that logs steps needs it as much as the verification responses.
+      await onStep({ step: { action: "complete", chargeId: first?.charge_id ?? null }, response: first });
+    }
+
     const driven = await driveCardVerification({
       vault,
       result: first,
