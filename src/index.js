@@ -384,9 +384,29 @@ export class CheckoutSession {
    * redeploy rotates them, so call this before a card charge rather than trusting the constants.
    */
   async refreshCardActions({ maxChunks } = {}) {
+    // The current build is a REST SPA and has no server actions at all, so there is nothing to
+    // discover. One request settles it; crawling would only report 0/6 and worry the caller.
+    try {
+      const res = await fetch(`${this.checkoutOrigin}/api/checkouts/${encodeURIComponent(this.token)}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        return {
+          ids: {},
+          chunks: {},
+          crawled: 0,
+          missing: [],
+          transport: "rest",
+          checkoutOrigin: this.checkoutOrigin,
+        };
+      }
+    } catch {
+      /* fall through to the crawler */
+    }
+
     const result = await discoverCardActions(this.checkoutOrigin, this.token, maxChunks ? { maxChunks } : {});
     this.cardActionIds = { ...(this.cardActionIds || {}), ...result.ids };
-    return { ...result, checkoutOrigin: this.checkoutOrigin };
+    return { ...result, transport: "legacy", checkoutOrigin: this.checkoutOrigin };
   }
 
   /** The vault for this session, carrying any discovered action ids. */

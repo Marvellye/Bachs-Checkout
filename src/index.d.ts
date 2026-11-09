@@ -404,6 +404,8 @@ export declare class CheckoutSession {
     chunks: Record<string, string>;
     crawled: number;
     missing: string[];
+    /** "rest" builds need no action ids; "legacy" builds were crawled. */
+    transport: "rest" | "legacy";
     checkoutOrigin: string;
   }>;
 
