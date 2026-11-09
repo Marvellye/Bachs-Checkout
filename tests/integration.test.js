@@ -31,26 +31,28 @@ const common = {
 };
 
 test("card payment settles end to end", { skip }, async () => {
+  // NGN settles server-side. The USD card rail returns an inline Stripe intent that must be
+  // confirmed in a browser, which is a different test (see below).
   const session = await bachs.checkoutSessions.createRaw({
     ...common,
-    amount: "1.00",
-    currency: "USD",
+    amount: "100",
+    currency: "NGN",
     reference: `it-card-${Date.now()}`,
     metadata: { source: "integration-test" },
   });
 
-  assert.equal(session.amount, "1.00");
+  assert.equal(session.amount, "100.00");
   assert.match(session.checkout_url, /\/c\//);
 
   const checkout = CheckoutSession.fromUrl(session.checkout_url);
   const detail = await checkout.detail();
-  assert.equal(detail.amount, "1.00");
+  assert.equal(detail.amount, "100.00");
   assert.equal(detail.products, null, "product-less sessions report products: null, not []");
   assert.ok(detail.payment_methods.length > 0);
 
   const payment = await checkout.pay({
     rail: "card",
-    currency: "USD",
+    currency: "NGN",
     card: { card_number: "4242424242424242", expiry_month: 9, expiry_year: 2033, cvv: "431" },
   });
   assert.equal(payment.type, "card");
@@ -58,25 +60,45 @@ test("card payment settles end to end", { skip }, async () => {
 
   const final = await checkout.waitForPayment(payment.chargeId, { timeoutMs: 60000, intervalMs: 2000 });
   assert.equal(final.charge_status, "succeeded");
-  assert.equal(final.amount_paid, "1.00");
+  assert.equal(final.amount_paid, "100.00");
   assert.equal(final.amount_remaining, "0.00");
 
   const server = await bachs.checkoutSessions.get(session.checkout_id);
   assert.equal(server.status, "completed");
 });
 
-test("a declined card leaves the session open for retry", { skip }, async () => {
+test("a USD card returns an inline Stripe intent to confirm in the browser", { skip }, async () => {
   const session = await bachs.checkoutSessions.createRaw({
     ...common,
     amount: "1.00",
     currency: "USD",
-    reference: `it-decline-${Date.now()}`,
+    reference: `it-usd-inline-${Date.now()}`,
   });
   const checkout = CheckoutSession.fromUrl(session.checkout_url);
 
   const payment = await checkout.pay({
     rail: "card",
     currency: "USD",
+    card: { card_number: "4242424242424242", expiry_month: 9, expiry_year: 2033, cvv: "431" },
+  });
+
+  // normalise keeps the rail name as the type; the client secret is what marks it as inline.
+  assert.equal(payment.type, "card");
+  assert.match(payment.clientSecret, /_secret_/, "USD cards confirm with Stripe.js, not server-side");
+});
+
+test("a declined card leaves the session open for retry", { skip }, async () => {
+  const session = await bachs.checkoutSessions.createRaw({
+    ...common,
+    amount: "100",
+    currency: "NGN",
+    reference: `it-decline-${Date.now()}`,
+  });
+  const checkout = CheckoutSession.fromUrl(session.checkout_url);
+
+  const payment = await checkout.pay({
+    rail: "card",
+    currency: "NGN",
     card: { card_number: "4000000000000002", expiry_month: 9, expiry_year: 2033, cvv: "431" },
   });
 

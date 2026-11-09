@@ -664,49 +664,85 @@ def public_checkout_folder():
 
 
 def card_vault_folder():
-    """The direct card path: RSA-sealed card data submitted through the checkout's own actions."""
-    base_headers = [
-        {"key": "Content-Type", "value": "text/plain;charset=UTF-8"},
-        {"key": "Accept", "value": "text/x-component"},
-        {"key": "Origin", "value": "{{checkoutOrigin}}"},
-    ]
+    """The direct card path on the current build: REST, not server actions."""
+    origin_headers = [{"key": "User-Agent", "value": "bachs-postman/0.2"}]
 
-    def action_item(name, action, args, desc, extra_headers=None):
-        headers = list(base_headers) + [{"key": "Next-Action", "value": CARD_ACTIONS[action]}]
-        if extra_headers:
-            headers.extend(extra_headers)
-        return req_item(name, "POST", "/c/{{checkout_token}}", args, desc,
-                        headers=headers, host="{{checkoutOrigin}}")
+    tests_grant = [
+        'pm.test("grant minted", () => pm.expect(pm.response.code).to.eql(200));',
+        'const b = pm.response.json();',
+        'pm.collectionVariables.set("vault_grant", b.grant);',
+        'pm.collectionVariables.set("collect_pin", String(b.collect_pin === true));',
+    ]
+    tests_token = [
+        'pm.test("tokenized", () => pm.expect(pm.response.code).to.eql(200));',
+        'const b = pm.response.json();',
+        'pm.collectionVariables.set("card_handle", b.handle || b.card_token);',
+        'pm.test("no PAN in the response", () => pm.expect(JSON.stringify(b)).to.not.include("4242"));',
+    ]
+    tests_complete = [
+        'pm.test("charge started", () => pm.expect(pm.response.code).to.eql(200));',
+        'const b = pm.response.json();',
+        'pm.collectionVariables.set("charge_id", b.charge_id);',
+        'pm.collectionVariables.set("transaction_id", b.transaction_id || "");',
+    ]
 
     items = [
         req_item("0. Vault public key (RSA-OAEP-256)", "GET", "/api/vault/public-key", None,
-                 "Serve-side of the checkout origin. Import the SPKI PEM, encrypt an AES-256-GCM key with "
-                 "RSA-OAEP-SHA256, seal the card JSON. The SDK's CardVault.seal() does exactly this.",
-                 headers=[{"key": "User-Agent", "value": "bachs-postman/0.1"}],
-                 host="{{checkoutOrigin}}"),
-        action_item("1. mintTokenizeGrant", "mintTokenizeGrant", ["{{checkout_token}}"],
-                    "Mints a short-lived grant (120s) that authorises one tokenization. Body is the argument "
-                    "array. Response carries {grant, expires_in, collect_pin}."),
-        action_item("2. tokenizeCardWithGrantRetry", "tokenizeCardWithGrantRetry",
-                    ["{{checkout_token}}", "{{vault_grant}}", "{{sealed_card}}"],
-                    "Send the sealed card: {encrypted_key, iv, ciphertext} (base64). Returns a vault handle "
-                    "like vlt_... plus brand and last4. The PAN never appears in the response."),
-        action_item("3. completeCardCheckout", "completeCardCheckout",
-                    ["{{checkout_token}}", "{{card_handle}}", "{{quote_id}}", {}],
-                    "Fires the card payment. Then poll the public charge-status endpoint for the outcome."),
-        action_item("4. authorizeCardStep (OTP)", "authorizeCardStep",
-                    ["{{checkout_token}}", {"code": "{{otp_code}}"}],
-                    "Issuer asked for an OTP (next_action.type = requires_otp)."),
-        action_item("5. authorizePinViaVault (PIN)", "authorizePinViaVault",
-                    ["{{checkout_token}}", {"code": "{{card_pin}}"}],
-                    "Some NGN cards require a PIN after tokenization (grant.collect_pin = true)."),
+                 "On the checkout origin, not the API. Import the SPKI PEM, encrypt a fresh AES-256-GCM "
+                 "key with RSA-OAEP-SHA256, and seal the card JSON as {encrypted_key, iv, ciphertext}. "
+                 "CardVault.seal() does exactly this; the PAN never leaves your process in clear.",
+                 headers=origin_headers, host="{{checkoutOrigin}}"),
+        req_item("1. Mint a tokenize grant", "POST", "/api/checkouts/{{checkout_token}}/tokenize-grant", {},
+                 "Short-lived grant for one tokenization. Responds {grant, expires_in, collect_pin}. "
+                 "collect_pin: true means the PIN must be sealed INSIDE the card payload, before the "
+                 "charge exists - most Nigerian issuers do this. Send an empty JSON object as the body.",
+                 headers=origin_headers, host="{{checkoutOrigin}}", tests=tests_grant),
+        req_item("2. Tokenize the sealed card", "POST", "/api/vault/tokenize",
+                 {"grant": "{{vault_grant}}", "encrypted": "{{sealed_card}}", "checkoutId": "{{checkout_token}}"},
+                 "Send the sealed blob. Returns {handle: vlt_..., brand, last4}. If it answers that the "
+                 "grant is stale, mint a new one and retry once - the SDK does that for you.",
+                 headers=origin_headers, host="{{checkoutOrigin}}", tests=tests_token),
+        req_item("3. Complete the charge", "POST", "/api/checkouts/{{checkout_token}}/complete",
+                 {"payment_method": "NGN_CARD", "card_token": "{{card_handle}}", "quote_id": "{{quote_id}}",
+                  "device_information": {"javascript_enabled": True, "java_enabled": False}},
+                 "NGN_CARD settles server-side (Flutterwave) and moves to succeeded by itself. USD_CARD "
+                 "returns payment_type: inline with a Stripe client_secret that has to be confirmed in a "
+                 "browser with Stripe.js - there is no server-side settlement for that rail.",
+                 headers=origin_headers, host="{{checkoutOrigin}}", tests=tests_complete),
+        req_item("4a. Authorize: OTP", "POST", "/api/checkouts/{{checkout_token}}/card-authorize",
+                 {"charge_id": "{{charge_id}}", "type": "otp", "otp": "{{otp_code}}"},
+                 "next_action.type = requires_otp. A wrong or expired code answers status: failed with "
+                 "next_action.type still requires_otp - that is a re-prompt, not a dead end.",
+                 headers=origin_headers, host="{{checkoutOrigin}}"),
+        req_item("4b. Authorize: resend the OTP", "POST", "/api/checkouts/{{checkout_token}}/card-authorize",
+                 {"charge_id": "{{charge_id}}", "type": "resend_otp"},
+                 "Ask the issuer for a fresh code. Codes are single-use and bound to one charge, so a code "
+                 "from an earlier attempt will always fail here.",
+                 headers=origin_headers, host="{{checkoutOrigin}}"),
+        req_item("4c. Authorize: billing address (AVS)", "POST", "/api/checkouts/{{checkout_token}}/card-authorize",
+                 {"charge_id": "{{charge_id}}", "type": "avs",
+                  "address": {"line1": "1 Example Way", "city": "Lagos", "state": "LA",
+                              "postal_code": "100001", "country": "NG"}},
+                 "next_action.type = requires_avs.", headers=origin_headers, host="{{checkoutOrigin}}"),
+        req_item("5. Authorize: PIN after the charge", "POST", "/api/vault/authorize-pin",
+                 {"transactionId": "{{transaction_id}}", "pin": "{{card_pin}}"},
+                 "Fallback only: the common Nigerian path wants the PIN inside the sealed card instead "
+                 "(see collect_pin on step 1). This endpoint keys by transaction id, not charge id.",
+                 headers=origin_headers, host="{{checkoutOrigin}}"),
+        req_item("6. Charge status", "GET",
+                 "/api/checkouts/{{checkout_token}}/charges/{{charge_id}}/status", None,
+                 "Poll until charge_status is terminal. The legacy /v1/public/... equivalent still answers, "
+                 "and both report the same state.",
+                 headers=origin_headers, host="{{checkoutOrigin}}"),
     ]
     return {
         "name": "Card vault (direct card data)",
-        "description": "The checkout page's own card path, callable from your server: card data sealed with "
-                       "the vault's public key, then Next.js server actions on the checkout origin. "
-                       "These action ids belong to a build - if Bachs redeploys the checkout, refresh them "
-                       "from the bundle. Prefer the inline Stripe rail when it is available.",
+        "description": "The checkout page's own card path, callable from your server: card data sealed "
+                       "with the vault's RSA key, then the checkout origin's REST API. No secret key is "
+                       "involved - the checkout token is the credential.\n\n"
+                       "Until October 2026 this surface was Next.js server actions whose ids changed per "
+                       "build. The current build is a Vite SPA on REST, so no ids are needed; the SDK "
+                       "detects which transport a build speaks and falls back on its own.",
         "item": items,
     }
 

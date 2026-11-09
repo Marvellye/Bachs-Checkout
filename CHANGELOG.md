@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.7
+
+### Fixed
+
+- Card payments stopped working when Bachs replaced the hosted checkout. The page used to be Next.js
+  and expose server actions; it is now a Vite SPA whose card path is plain REST on the checkout
+  origin, so every server-action call answered
+  `406 {"error":"Only HTML requests are supported here"}`. Both sandbox and live were affected.
+  The vault now speaks the REST transport, and detects which build it is against, so neither a
+  redeploy nor a rollback breaks a card charge. The old server-action path is kept as a fallback.
+
+### Changed
+
+- `complete` on the REST build takes the payment method and a `card_token`. `pay()` and `payCard()`
+  pass them, so a card charge no longer needs a discovered action id.
+- `authorizePin()` accepts `transactionId`, which is what the current build's vault endpoint keys
+  on, in addition to `chargeId` for the legacy build.
+- The sealed card now carries `expiry_month` and `expiry_year` as two-character strings (`"09"`,
+  `"33"`), matching what the hosted checkout sends byte for byte.
+
+### Documented
+
+- `NGN_CARD` settles server-side; `USD_CARD` returns an inline Stripe intent that has to be
+  confirmed in a browser. A server-only integration can take Naira cards and cannot take USD ones,
+  which is worth knowing before promising otherwise.
+- Postman collection: the card vault folder is REST now (8 requests), and the OTP request carries the
+  real body `{charge_id, type, otp}` instead of the placeholder it had.
+- The integration suite covers the new transport, including a test that asserts the USD rail stays
+  inline.
+
 ## 0.2.6
 
 ### Added

@@ -1139,7 +1139,7 @@
     },
     {
       "name": "Card vault (direct card data)",
-      "description": "The checkout page's own card path, callable from your server: card data sealed with the vault's public key, then Next.js server actions on the checkout origin. These action ids belong to a build - if Bachs redeploys the checkout, refresh them from the bundle. Prefer the inline Stripe rail when it is available.",
+      "description": "The checkout page's own card path, callable from your server: card data sealed with the vault's RSA key, then the checkout origin's REST API. No secret key is involved - the checkout token is the credential.\n\nUntil October 2026 this surface was Next.js server actions whose ids changed per build. The current build is a Vite SPA on REST, so no ids are needed; the SDK detects which transport a build speaks and falls back on its own.",
       "item": [
         {
           "name": "0. Vault public key (RSA-OAEP-256)",
@@ -1148,7 +1148,7 @@
             "header": [
               {
                 "key": "User-Agent",
-                "value": "bachs-postman/0.1"
+                "value": "bachs-postman/0.2"
               }
             ],
             "url": {
@@ -1162,30 +1162,18 @@
                 "public-key"
               ]
             },
-            "description": "Serve-side of the checkout origin. Import the SPKI PEM, encrypt an AES-256-GCM key with RSA-OAEP-SHA256, seal the card JSON. The SDK's CardVault.seal() does exactly this."
+            "description": "On the checkout origin, not the API. Import the SPKI PEM, encrypt a fresh AES-256-GCM key with RSA-OAEP-SHA256, and seal the card JSON as {encrypted_key, iv, ciphertext}. CardVault.seal() does exactly this; the PAN never leaves your process in clear."
           },
           "response": []
         },
         {
-          "name": "1. mintTokenizeGrant",
+          "name": "1. Mint a tokenize grant",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "Content-Type",
-                "value": "text/plain;charset=UTF-8"
-              },
-              {
-                "key": "Accept",
-                "value": "text/x-component"
-              },
-              {
-                "key": "Origin",
-                "value": "{{checkoutOrigin}}"
-              },
-              {
-                "key": "Next-Action",
-                "value": "401e47952554c1841a2eea4c949c0d9a2bc472aabb"
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
               },
               {
                 "key": "Content-Type",
@@ -1193,19 +1181,191 @@
               }
             ],
             "url": {
-              "raw": "{{checkoutOrigin}}/c/{{checkout_token}}",
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/tokenize-grant",
               "host": [
                 "{{checkoutOrigin}}"
               ],
               "path": [
-                "c",
-                "{{checkout_token}}"
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "tokenize-grant"
               ]
             },
-            "description": "Mints a short-lived grant (120s) that authorises one tokenization. Body is the argument array. Response carries {grant, expires_in, collect_pin}.",
+            "description": "Short-lived grant for one tokenization. Responds {grant, expires_in, collect_pin}. collect_pin: true means the PIN must be sealed INSIDE the card payload, before the charge exists - most Nigerian issuers do this. Send an empty JSON object as the body.",
             "body": {
               "mode": "raw",
-              "raw": "[\n  \"{{checkout_token}}\"\n]",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"grant minted\", () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.collectionVariables.set(\"vault_grant\", b.grant);",
+                  "",
+                  "pm.collectionVariables.set(\"collect_pin\", String(b.collect_pin === true));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Tokenize the sealed card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{checkoutOrigin}}/api/vault/tokenize",
+              "host": [
+                "{{checkoutOrigin}}"
+              ],
+              "path": [
+                "api",
+                "vault",
+                "tokenize"
+              ]
+            },
+            "description": "Send the sealed blob. Returns {handle: vlt_..., brand, last4}. If it answers that the grant is stale, mint a new one and retry once - the SDK does that for you.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant\": \"{{vault_grant}}\",\n  \"encrypted\": \"{{sealed_card}}\",\n  \"checkoutId\": \"{{checkout_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"tokenized\", () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.collectionVariables.set(\"card_handle\", b.handle || b.card_token);",
+                  "",
+                  "pm.test(\"no PAN in the response\", () => pm.expect(JSON.stringify(b)).to.not.include(\"4242\"));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Complete the charge",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/complete",
+              "host": [
+                "{{checkoutOrigin}}"
+              ],
+              "path": [
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "complete"
+              ]
+            },
+            "description": "NGN_CARD settles server-side (Flutterwave) and moves to succeeded by itself. USD_CARD returns payment_type: inline with a Stripe client_secret that has to be confirmed in a browser with Stripe.js - there is no server-side settlement for that rail.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"NGN_CARD\",\n  \"card_token\": \"{{card_handle}}\",\n  \"quote_id\": \"{{quote_id}}\",\n  \"device_information\": {\n    \"javascript_enabled\": true,\n    \"java_enabled\": false\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"charge started\", () => pm.expect(pm.response.code).to.eql(200));",
+                  "",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.collectionVariables.set(\"charge_id\", b.charge_id);",
+                  "",
+                  "pm.collectionVariables.set(\"transaction_id\", b.transaction_id || \"\");",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4a. Authorize: OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/card-authorize",
+              "host": [
+                "{{checkoutOrigin}}"
+              ],
+              "path": [
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "card-authorize"
+              ]
+            },
+            "description": "next_action.type = requires_otp. A wrong or expired code answers status: failed with next_action.type still requires_otp - that is a re-prompt, not a dead end.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"charge_id\": \"{{charge_id}}\",\n  \"type\": \"otp\",\n  \"otp\": \"{{otp_code}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1216,25 +1376,13 @@
           "response": []
         },
         {
-          "name": "2. tokenizeCardWithGrantRetry",
+          "name": "4b. Authorize: resend the OTP",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "Content-Type",
-                "value": "text/plain;charset=UTF-8"
-              },
-              {
-                "key": "Accept",
-                "value": "text/x-component"
-              },
-              {
-                "key": "Origin",
-                "value": "{{checkoutOrigin}}"
-              },
-              {
-                "key": "Next-Action",
-                "value": "70008f5fa5e47a0ac1ecaf0bd9276d63aed5d690a9"
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
               },
               {
                 "key": "Content-Type",
@@ -1242,19 +1390,21 @@
               }
             ],
             "url": {
-              "raw": "{{checkoutOrigin}}/c/{{checkout_token}}",
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/card-authorize",
               "host": [
                 "{{checkoutOrigin}}"
               ],
               "path": [
-                "c",
-                "{{checkout_token}}"
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "card-authorize"
               ]
             },
-            "description": "Send the sealed card: {encrypted_key, iv, ciphertext} (base64). Returns a vault handle like vlt_... plus brand and last4. The PAN never appears in the response.",
+            "description": "Ask the issuer for a fresh code. Codes are single-use and bound to one charge, so a code from an earlier attempt will always fail here.",
             "body": {
               "mode": "raw",
-              "raw": "[\n  \"{{checkout_token}}\",\n  \"{{vault_grant}}\",\n  \"{{sealed_card}}\"\n]",
+              "raw": "{\n  \"charge_id\": \"{{charge_id}}\",\n  \"type\": \"resend_otp\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1265,25 +1415,13 @@
           "response": []
         },
         {
-          "name": "3. completeCardCheckout",
+          "name": "4c. Authorize: billing address (AVS)",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "Content-Type",
-                "value": "text/plain;charset=UTF-8"
-              },
-              {
-                "key": "Accept",
-                "value": "text/x-component"
-              },
-              {
-                "key": "Origin",
-                "value": "{{checkoutOrigin}}"
-              },
-              {
-                "key": "Next-Action",
-                "value": "78c10d5fadf85ecdb798e781a46ace709ca32ee329"
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
               },
               {
                 "key": "Content-Type",
@@ -1291,19 +1429,21 @@
               }
             ],
             "url": {
-              "raw": "{{checkoutOrigin}}/c/{{checkout_token}}",
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/card-authorize",
               "host": [
                 "{{checkoutOrigin}}"
               ],
               "path": [
-                "c",
-                "{{checkout_token}}"
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "card-authorize"
               ]
             },
-            "description": "Fires the card payment. Then poll the public charge-status endpoint for the outcome.",
+            "description": "next_action.type = requires_avs.",
             "body": {
               "mode": "raw",
-              "raw": "[\n  \"{{checkout_token}}\",\n  \"{{card_handle}}\",\n  \"{{quote_id}}\",\n  {}\n]",
+              "raw": "{\n  \"charge_id\": \"{{charge_id}}\",\n  \"type\": \"avs\",\n  \"address\": {\n    \"line1\": \"1 Example Way\",\n    \"city\": \"Lagos\",\n    \"state\": \"LA\",\n    \"postal_code\": \"100001\",\n    \"country\": \"NG\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1314,25 +1454,13 @@
           "response": []
         },
         {
-          "name": "4. authorizeCardStep (OTP)",
+          "name": "5. Authorize: PIN after the charge",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "Content-Type",
-                "value": "text/plain;charset=UTF-8"
-              },
-              {
-                "key": "Accept",
-                "value": "text/x-component"
-              },
-              {
-                "key": "Origin",
-                "value": "{{checkoutOrigin}}"
-              },
-              {
-                "key": "Next-Action",
-                "value": "601d19c6512a8e072046ffb28cec658c7461c0d371"
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
               },
               {
                 "key": "Content-Type",
@@ -1340,19 +1468,20 @@
               }
             ],
             "url": {
-              "raw": "{{checkoutOrigin}}/c/{{checkout_token}}",
+              "raw": "{{checkoutOrigin}}/api/vault/authorize-pin",
               "host": [
                 "{{checkoutOrigin}}"
               ],
               "path": [
-                "c",
-                "{{checkout_token}}"
+                "api",
+                "vault",
+                "authorize-pin"
               ]
             },
-            "description": "Issuer asked for an OTP (next_action.type = requires_otp).",
+            "description": "Fallback only: the common Nigerian path wants the PIN inside the sealed card instead (see collect_pin on step 1). This endpoint keys by transaction id, not charge id.",
             "body": {
               "mode": "raw",
-              "raw": "[\n  \"{{checkout_token}}\",\n  {\n    \"code\": \"{{otp_code}}\"\n  }\n]",
+              "raw": "{\n  \"transactionId\": \"{{transaction_id}}\",\n  \"pin\": \"{{card_pin}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1363,51 +1492,30 @@
           "response": []
         },
         {
-          "name": "5. authorizePinViaVault (PIN)",
+          "name": "6. Charge status",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [
               {
-                "key": "Content-Type",
-                "value": "text/plain;charset=UTF-8"
-              },
-              {
-                "key": "Accept",
-                "value": "text/x-component"
-              },
-              {
-                "key": "Origin",
-                "value": "{{checkoutOrigin}}"
-              },
-              {
-                "key": "Next-Action",
-                "value": "609fb1f9e88b842d448abfa03c92b5143cce7a61fc"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+                "key": "User-Agent",
+                "value": "bachs-postman/0.2"
               }
             ],
             "url": {
-              "raw": "{{checkoutOrigin}}/c/{{checkout_token}}",
+              "raw": "{{checkoutOrigin}}/api/checkouts/{{checkout_token}}/charges/{{charge_id}}/status",
               "host": [
                 "{{checkoutOrigin}}"
               ],
               "path": [
-                "c",
-                "{{checkout_token}}"
+                "api",
+                "checkouts",
+                "{{checkout_token}}",
+                "charges",
+                "{{charge_id}}",
+                "status"
               ]
             },
-            "description": "Some NGN cards require a PIN after tokenization (grant.collect_pin = true).",
-            "body": {
-              "mode": "raw",
-              "raw": "[\n  \"{{checkout_token}}\",\n  {\n    \"code\": \"{{card_pin}}\"\n  }\n]",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
+            "description": "Poll until charge_status is terminal. The legacy /v1/public/... equivalent still answers, and both report the same state."
           },
           "response": []
         }

@@ -131,22 +131,39 @@ it cannot host this SDK's card path, and should say so rather than shipping a we
 `driveCardVerification({vault, result, onVerification, maxAttempts})` loops those steps through a
 callback. A rejected OTP is a re-prompt, not a dead end, and the loop is bounded.
 
-The vault's server-action ids (`mintTokenizeGrant`, `tokenizeCardWithGrantRetry`,
-`completeCardCheckout`, `authorizeCardStep`, `authorizePinViaVault`, `pollChargeStatus`) are per
-build, and **all six differ between sandbox and live**. Resolve them at runtime by crawling
-`/_next/static/chunks/*.js` for `createServerReference` calls; never hardcode, and never ship
-sandbox ids as a live fallback.
+The checkout has shipped as two different applications, and the card path differs.
 
-The JS SDK exposes this as `discoverCardActions(checkoutOrigin, token)` plus
-`CheckoutSession#refreshCardActions()`. Ports must implement the same two, with the same names,
-because a port without it cannot charge a live card at all. Bound the crawl (250 chunks, 8 at a
-time), stop once all six are found, and surface `ACTION_STALE` when a request still 404s so callers
-can refresh and retry once.
+**Current build (since October 2026): a Vite SPA on REST.** No action ids, nothing to discover.
+Everything below is relative to the checkout origin, with the URL token as the path id.
 
-Both bundled and escaped call forms occur in the same bundle, so match:
-`createServerReference)(" <20-64 hex> ", " <actionName> ")` with optional backslashes before the quotes.
+| Purpose | Request |
+| --- | --- |
+| detail | `GET /api/checkouts/{token}` → `{source, checkout}` |
+| quote | `POST /api/checkouts/{token}/quote` `{payment_method, currency, payment_rail?}` |
+| requirements | `POST /api/checkouts/{token}/requirements` |
+| complete | `POST /api/checkouts/{token}/complete` `{payment_method, card_token, quote_id, device_information}` |
+| charge status | `GET /api/checkouts/{token}/charges/{chargeId}/status` |
+| vault key | `GET /api/vault/public-key` |
+| tokenize grant | `POST /api/checkouts/{token}/tokenize-grant` `{}` → `{grant, expires_in, collect_pin}` |
+| tokenize | `POST /api/vault/tokenize` `{grant, encrypted, checkoutId}` → `{handle, brand, last4}` |
+| card authorize | `POST /api/checkouts/{token}/card-authorize` `{charge_id, type: "otp"|"resend_otp"|"avs", ...}` |
+| pin after charge | `POST /api/vault/authorize-pin` `{transactionId, pin}` |
 
-## 8. Errors
+**Legacy build: Next.js server actions.** Ids were per build (`mintTokenizeGrant`,
+`tokenizeCardWithGrantRetry`, `completeCardCheckout`, `authorizeCardStep`, `authorizePinViaVault`,
+`pollChargeStatus`), discovered by crawling `/_next/static/chunks/*.js`.
+
+A port must do what the JS SDK does: ask the origin which build it is, then route. The REST detail
+endpoint only exists on the new build, so one request settles it. Do not hardcode either transport,
+and do not ship sandbox ids as a live fallback.
+
+## 7b. What each card rail does
+
+`NGN_CARD` settles server-side through the processor (`payment_type: processing`, then poll to
+`succeeded`). `USD_CARD` returns `payment_type: inline` with a Stripe `client_secret` that must be
+confirmed in a browser with Stripe.js; there is no server-side settlement for it.
+
+## 8. Errors## 8. Errors
 
 Everything throws one error type carrying `status`, `code` (the API's `error_code`), `detail` and
 the parsed `body`. The API's envelope is `{ detail, error_code, errors? }` and its validation errors
@@ -191,8 +208,11 @@ client injectable so tests need no network.
 - [ ] `normalise` returns the five `type` values, with `null` fields preserved rather than omitted.
 - [ ] Card sealing produces `{encrypted_key, iv, ciphertext}` that the vault accepts.
 - [ ] `collect_pin` from `mintTokenizeGrant` is honoured: the PIN is sealed inside the card payload.
-- [ ] `discoverCardActions` / `refreshCardActions` exist and resolve 6/6 ids on a live token.
-- [ ] `ACTION_STALE` is surfaced with that exact code so a caller can refresh and retry.
+- [ ] The transport is detected per build: REST when `/api/checkouts/{token}` answers, server
+      actions otherwise. Both paths work; neither is hardcoded.
+- [ ] `collect_pin` is honoured, with the PIN inside the sealed payload.
+- [ ] An inline (`client_secret`) card result is reported as inline, never as a settled charge.
+- [ ] `discoverCardActions` / `refreshCardActions` still exist for legacy builds.
 - [ ] `nextCardStep` handles all seven actions and never throws on junk.
 - [ ] Error type carries `status`, `code`, `detail`, `body`; `isUncertainWrite` matches.
 - [ ] Webhook verification works against raw bytes, rotation, and a stale timestamp.

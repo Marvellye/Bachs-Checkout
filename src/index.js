@@ -487,11 +487,13 @@ export class CheckoutSession {
 
     if (r.kind === "card" && card) {
       const vault = this.#vault();
-      const { handle } = await vault.tokenize(card);
+      const grant = await vault.mintGrant();
+      const { handle } = await vault.tokenize(card, { grant: grant.grant, collectPin: grant.collectPin });
       const result = await vault.complete({
         handle,
         quoteId: quote.quote_id,
         deviceInformation: cardOptions?.deviceInformation,
+        paymentMethod: r.paymentMethod,
       });
       return normalise(result, r, quote);
     }
@@ -586,6 +588,7 @@ export class CheckoutSession {
       handle,
       quoteId: quote.quote_id,
       deviceInformation: cardOptions?.deviceInformation,
+      paymentMethod: rail.paymentMethod,
     });
 
     if (typeof onStep === "function") {

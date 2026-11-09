@@ -290,29 +290,39 @@ const first = await vault.complete({ handle, quoteId });
 If the card arrives already sealed while the build wants a PIN, it fails with `PIN_REQUIRED` instead
 of sending a charge that cannot succeed. Live answers `collect_pin: true` on both NGN and USD.
 
-### The action ids are per build
+### Two builds, two transports
 
-The vault's server-action ids belong to whichever checkout build is deployed. All six differ between
-sandbox and live, and a redeploy can rotate them, so resolve them rather than trusting constants:
+The hosted checkout has been two different applications, and the card path differs between them.
 
-```js
-const checkout = CheckoutSession.fromUrl(session.checkout_url);
-const { ids, crawled, missing } = await checkout.refreshCardActions();
-// 6/6 resolved from 16 chunks on a live session, ~2s
+**Since October 2026 (current).** A Vite SPA talking to a REST API on the checkout origin. No action
+ids, no crawling, nothing to refresh:
+
+```
+GET  {checkoutOrigin}/api/vault/public-key
+POST {checkoutOrigin}/api/checkouts/{token}/tokenize-grant      -> {grant, expires_in, collect_pin}
+POST {checkoutOrigin}/api/vault/tokenize                         { grant, encrypted, checkoutId }
+POST {checkoutOrigin}/api/checkouts/{token}/complete             { payment_method, card_token, quote_id, device_information }
+POST {checkoutOrigin}/api/checkouts/{token}/card-authorize       { charge_id, type: "otp" | "resend_otp" | "avs", ... }
+POST {checkoutOrigin}/api/vault/authorize-pin                    { transactionId, pin }
+GET  {checkoutOrigin}/api/checkouts/{token}/charges/{id}/status
 ```
 
-Or from the shell:
+**Before that.** A Next.js app whose card path was server actions with per-build ids, which is what
+`discoverCardActions()` and `refreshCardActions()` exist for.
 
-```bash
-node scripts/discover-actions.mjs https://checkout.bachs.io <checkout-token>
-```
+Both are supported. `CheckoutSession` asks the origin which one it is talking to (the REST detail
+endpoint only exists on the new build) and routes accordingly, so you do not choose and nothing
+breaks when Bachs deploys again. `transport: "rest" | "legacy"` forces one if you ever need to.
 
-The resolved ids live on the session, so the next `payCard()` uses them. `new CheckoutSession(token,
-{ cardActionIds })` and `new CardVault({ token, actionIds })` still accept them by hand.
+### What each card rail actually does
 
-If a build moves underneath you mid-flight, the vault throws `err.code === "ACTION_STALE"` instead of
-a mystery 404: call `refreshCardActions()` again and retry once. A sandbox session can keep using the
-bundled constants; a live session cannot, because none of them match.
+| Rail | Outcome |
+| --- | --- |
+| `NGN_CARD` | settle server-side through the processor; `payment_type: processing`, then poll to `succeeded` |
+| `USD_CARD` | `payment_type: inline` with a Stripe `client_secret`; **must** be confirmed in a browser with Stripe.js |
+
+So a server-only integration can take Naira cards, and a USD card always needs a page. The SDK
+surfaces the secret as `payment.clientSecret` and never pretends the charge settled.
 
 ### If the rail is `inline` instead
 

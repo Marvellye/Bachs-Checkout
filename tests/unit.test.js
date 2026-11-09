@@ -353,7 +353,7 @@ test("CardVault rejects a call for an unknown action", async () => {
   await assert.rejects(() => vault.action("nope", []), /unknown card action/);
 });
 
-test("CardVault normalises 2-digit expiry years", async () => {
+test("CardVault seals the expiry shape the hosted checkout sends", async () => {
   const { publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   const pem = publicKey.export({ type: "spki", format: "pem" });
   const vault = new CardVault({ token: "tok" });
@@ -370,8 +370,30 @@ test("CardVault normalises 2-digit expiry years", async () => {
   }
 
   assert.equal(captured[0].card_number, "4242424242424242", "spaces stripped");
-  assert.equal(captured[0].expiry_month, 9, "month coerced to number");
-  assert.equal(captured[0].expiry_year, 2033, "2-digit year expanded");
+  // The current build seals MM / YY as two-character strings, so the payload matches it exactly:
+  // a 2033 expiry goes over the wire as "33", not 2033.
+  assert.equal(captured[0].expiry_month, "09", "month is a two-character string");
+  assert.equal(captured[0].expiry_year, "33", "year is the last two characters");
+});
+
+test("a four-digit expiry year is still accepted and reduced to YY", async () => {
+  const { publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = publicKey.export({ type: "spki", format: "pem" });
+  const vault = new CardVault({ token: "tok", transport: "legacy" });
+  vault.publicKey = async () => pem;
+  vault.action = async (name) => (name === "mintTokenizeGrant" ? { grant: "g" } : { handle: "vlt_1" });
+
+  const captured = [];
+  const originalSeal = CardVault.seal;
+  CardVault.seal = (pemArg, payload) => { captured.push(payload); return originalSeal(pemArg, payload); };
+  try {
+    await vault.tokenize({ card_number: "4242424242424242", expiry_month: 9, expiry_year: 2033, cvv: "123" });
+  } finally {
+    CardVault.seal = originalSeal;
+  }
+
+  assert.equal(captured[0].expiry_month, "09");
+  assert.equal(captured[0].expiry_year, "33");
 });
 
 /* ------------------------------------------------- session client plumbing */

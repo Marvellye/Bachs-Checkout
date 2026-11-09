@@ -44,12 +44,77 @@ export class CardVault {
    * @param {Record<string,string>} [opts.actionIds] discovered ids for this build
    * @param {number} [opts.timeoutMs]
    */
-  constructor({ token, checkoutOrigin = "https://sandbox-checkout.bachs.io", actionIds, timeoutMs = 45000 } = {}) {
+  constructor({
+    token,
+    checkoutOrigin = "https://sandbox-checkout.bachs.io",
+    actionIds,
+    timeoutMs = 45000,
+    transport = "auto",
+  } = {}) {
     if (!token) throw new Error("token is required");
     this.token = token;
     this.origin = checkoutOrigin.replace(/\/+$/, "");
     this.actions = { ...KNOWN_CARD_ACTIONS, ...(actionIds || {}) };
     this.timeoutMs = timeoutMs;
+    /** "auto" | "rest" (current builds) | "legacy" (Next.js server actions). */
+    this.transport = transport;
+    this.#modeCache = null;
+  }
+
+  #modeCache;
+
+  /**
+   * Which transport this build speaks. Current builds are a Vite SPA backed by REST under
+   * /api/checkouts; older ones were Next.js and exposed server actions with per-build ids. The
+   * detail endpoint only exists on the REST build, so one request settles it.
+   */
+  async #mode() {
+    if (this.transport !== "auto") return this.transport;
+    if (this.#modeCache) return this.#modeCache;
+    try {
+      const res = await fetch(`${this.origin}/api/checkouts/${encodeURIComponent(this.token)}`, {
+        headers: { Accept: "application/json", "User-Agent": UA },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      this.#modeCache = res.ok ? "rest" : "legacy";
+    } catch {
+      this.#modeCache = "legacy";
+    }
+    return this.#modeCache;
+  }
+
+  /** JSON call against the REST checkout API. `checkout` paths are relative to the token. */
+  async #rest(path, { body, method = "POST", absolute = false } = {}) {
+    const url = absolute
+      ? `${this.origin}/api${path}`
+      : `${this.origin}/api/checkouts/${encodeURIComponent(this.token)}${path}`;
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": UA,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    const text = await res.text();
+    let parsed = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = { raw: text };
+    }
+    if (!res.ok) {
+      const err = new Error(
+        `vault ${path} -> HTTP ${res.status}: ${(parsed?.detail ?? text).toString().slice(0, 300)}`
+      );
+      err.status = res.status;
+      err.code = parsed?.error_code ?? "ACTION_FAILED";
+      err.body = parsed;
+      throw err;
+    }
+    return parsed ?? {};
   }
 
   /** Fetch the vault's RSA-OAEP-256 public key (PEM, SPKI). */
@@ -149,10 +214,13 @@ export class CardVault {
   /** Seal locally, then tokenize. Returns a vault handle (`vlt_...`), brand and last4. */
   async tokenize(card, options = {}) {
     const pem = await this.publicKey();
+    const month = Number(card.expiry_month ?? card.exp_month);
+    const year = normalizeYear(card.expiry_year ?? card.exp_year);
     const sealed = CardVault.seal(pem, {
       card_number: String(card.card_number ?? card.number ?? "").replace(/\s+/g, ""),
-      expiry_month: Number(card.expiry_month ?? card.exp_month),
-      expiry_year: normalizeYear(card.expiry_year ?? card.exp_year),
+      // The hosted checkout sends MM and YY as two-character strings; match it exactly.
+      expiry_month: String(month).padStart(2, "0"),
+      expiry_year: String(year).slice(-2),
       cvv: String(card.cvv ?? card.cvc ?? ""),
       ...((card.cardholder_name || card.name) ? { cardholder_name: card.cardholder_name || card.name } : {}),
     }, card.pin);
@@ -167,6 +235,17 @@ export class CardVault {
    * @returns {Promise<{grant: string, collectPin: boolean, raw: object}>}
    */
   async mintGrant() {
+    if ((await this.#mode()) === "rest") {
+      const raw = await this.#rest("/tokenize-grant", { body: {} });
+      const grant = raw?.grant ?? null;
+      if (!grant) {
+        const err = new Error(`tokenize-grant returned no grant: ${JSON.stringify(raw).slice(0, 300)}`);
+        err.code = "TOKENIZE_FAILED";
+        err.body = raw;
+        throw err;
+      }
+      return { grant, collectPin: raw?.collect_pin === true, raw };
+    }
     const raw = await this.action("mintTokenizeGrant", [this.token]);
     const grant = raw?.grant ?? raw?.[0]?.grant ?? null;
     if (!grant) {
@@ -189,6 +268,22 @@ export class CardVault {
     if (!sealed?.ciphertext || !sealed?.encrypted_key || !sealed?.iv) {
       throw new Error("tokenizeSealed: expected { encrypted_key, iv, ciphertext }");
     }
+    if ((await this.#mode()) === "rest") {
+      const grant = existingGrant ?? (await this.mintGrant()).grant;
+      const tok = await this.#rest("/vault/tokenize", {
+        absolute: true,
+        body: { grant, encrypted: sealed, checkoutId: this.token },
+      });
+      const handle = tok?.handle ?? tok?.card_token ?? tok?.token;
+      if (!handle) {
+        const err = new Error(`tokenize returned no handle: ${JSON.stringify(tok).slice(0, 300)}`);
+        err.code = "TOKENIZE_FAILED";
+        err.body = tok;
+        throw err;
+      }
+      return { ...tok, handle, collectPin: knownCollectPin === true };
+    }
+
     const grant = existingGrant
       ? { grant: existingGrant, collect_pin: knownCollectPin }
       : await this.action("mintTokenizeGrant", [this.token]);
@@ -204,7 +299,17 @@ export class CardVault {
   }
 
   /** Fire the card payment for a tokenized handle. */
-  async complete({ handle, quoteId, deviceInformation }) {
+  async complete({ handle, quoteId, deviceInformation, paymentMethod = "USD_CARD" }) {
+    if ((await this.#mode()) === "rest") {
+      return this.#rest("/complete", {
+        body: {
+          payment_method: paymentMethod,
+          card_token: handle,
+          quote_id: quoteId,
+          ...(deviceInformation ? { device_information: deviceInformation } : {}),
+        },
+      });
+    }
     const result = await this.action("completeCardCheckout", [
       this.token,
       handle,
@@ -225,12 +330,13 @@ export class CardVault {
    *
    * @param {{chargeId: string, otp?: string, resend?: boolean}} input
    */
-  authorizeOtp({ chargeId, otp, resend = false } = {}) {
+  async authorizeOtp({ chargeId, otp, resend = false } = {}) {
     if (!chargeId) throw new Error("authorizeOtp: chargeId is required");
     if (!resend && !otp) throw new Error("authorizeOtp: otp is required (or pass resend: true)");
     const payload = resend
       ? { charge_id: chargeId, type: "resend_otp" }
       : { charge_id: chargeId, type: "otp", otp: String(otp).trim() };
+    if ((await this.#mode()) === "rest") return this.#rest("/card-authorize", { body: payload });
     return this.action("authorizeCardStep", [this.token, payload]);
   }
 
@@ -238,7 +344,7 @@ export class CardVault {
    * Answer an address-verification (AVS) challenge.
    * @param {{chargeId: string, address: {line1: string, city: string, state: string, postal_code: string, country?: string}}} input
    */
-  submitAvs({ chargeId, address } = {}) {
+  async submitAvs({ chargeId, address } = {}) {
     if (!chargeId) throw new Error("submitAvs: chargeId is required");
     if (!address?.line1 || !address?.city || !address?.state || !address?.postal_code) {
       throw new Error("submitAvs: address needs line1, city, state and postal_code");
@@ -255,7 +361,7 @@ export class CardVault {
    * Signature inferred from the checkout build as `(chargeId, pin)` - unlike the OTP action this one
    * does not take the checkout token. Unverified against a live issuer; see README caveats.
    */
-  authorizePin({ chargeId, pin } = {}) {
+  async authorizePin({ chargeId, pin } = {}) {
     if (!chargeId) throw new Error("authorizePin: chargeId is required");
     if (!pin) throw new Error("authorizePin: pin is required");
     return this.action("authorizePinViaVault", [chargeId, String(pin)]);
