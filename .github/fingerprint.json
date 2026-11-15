@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-11-15T21:37:05.889Z",
+  "checkoutOrigin": "https://sandbox-checkout.bachs.io",
+  "transport": "rest",
+  "assetCount": 7,
+  "assets": [
+    "/assets/_token-DfF7YZA6.js",
+    "/assets/api-OmnHTWoZ.js",
+    "/assets/banner-Bhft1GCM.js",
+    "/assets/index-BL6XUlvw.js",
+    "/assets/money-BfAX3424.js",
+    "/assets/react-oZKmjzt7.js",
+    "/assets/rolldown-runtime-Bjp52BOI.js"
+  ],
+  "nextChunkCount": 0,
+  "endpoints": {
+    "GET /api/checkouts/{token}": 200,
+    "POST /api/checkouts/{token}/tokenize-grant": 200,
+    "GET /api/vault/public-key": 200
+  },
+  "fields": {
+    "detail": [
+      "checkout",
+      "source"
+    ],
+    "tokenizeGrant": [
+      "collect_pin",
+      "expires_in",
+      "grant"
+    ],
+    "vaultKey": [
+      "algorithm",
+      "public_key_pem"
+    ]
+  },
+  "legacyV1Detail": 200
+}

@@ -1,0 +1,230 @@
+name: Drift
+
+# Bachs redeploys the hosted checkout without notice: on 2026-10-31 the page changed from Next.js
+# server actions to a Vite SPA on REST, which broke card payments with a 406 until the SDK caught
+# up. This workflow exists so that never again arrives as a user bug report.
+#
+# Daily is deliberate. Their build rotated its asset hashes twice in one day, but the thing worth
+# reacting to is a *contract* change, and those are rare. Daily catches a change within a working
+# day without spamming a public repo's Actions minutes.
+
+on:
+  schedule:
+    # 06:17 UTC, not 06:00: GitHub's scheduler is busiest on the hour and delays those runs.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: drift
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    name: offline checks (no credentials)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run typecheck
+
+  drift:
+    name: checkout build fingerprint
+    runs-on: ubuntu-latest
+    needs: offline
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+      summary: ${{ steps.compare.outputs.summary }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+
+      - name: Check for the sandbox key
+        id: key
+        run: |
+          if [ -n "${{ secrets.BACHS_SANDBOX_KEY }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "BACHS_SANDBOX_KEY not set - skipping the fingerprint"
+          fi
+
+      - name: Compare the build against the committed baseline
+        id: compare
+        if: steps.key.outputs.present == 'true'
+        env:
+          BACHS_SECRET_KEY: ${{ secrets.BACHS_SANDBOX_KEY }}
+        run: |
+          set +e
+          node scripts/fingerprint.mjs --compare .github/fingerprint.json > drift.txt 2>&1
+          code=$?
+          set -e
+          cat drift.txt
+          {
+            echo "changed=false"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 2 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "summary<<DRIFT_EOF"
+              head -c 3000 drift.txt
+              echo
+              echo "DRIFT_EOF"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$code" -ne 0 ]; then
+            echo "fingerprint failed with exit $code"
+            {
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "summary<<DRIFT_EOF" >> "$GITHUB_OUTPUT"
+              head -c 3000 drift.txt >> "$GITHUB_OUTPUT"
+              echo "DRIFT_EOF" >> "$GITHUB_OUTPUT"
+            }
+          fi
+
+      - name: Save the current fingerprint for whoever updates the baseline
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          BACHS_SECRET_KEY: ${{ secrets.BACHS_SANDBOX_KEY }}
+        run: node scripts/fingerprint.mjs > fingerprint-current.json
+
+      - uses: actions/upload-artifact@v4
+        if: steps.compare.outputs.changed == 'true'
+        with:
+          name: fingerprint
+          path: fingerprint-current.json
+
+      - name: Open or update the drift issue
+        if: steps.compare.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          SUMMARY: ${{ steps.compare.outputs.summary }}
+        with:
+          script: |
+            const marker = "<!-- bachs-drift -->";
+            const body = [
+              marker,
+              "The sandbox checkout build no longer matches `.github/fingerprint.json`.",
+              "",
+              "```",
+              (process.env.SUMMARY || "(no detail captured)").slice(0, 4000),
+              "```",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "**What to do**",
+              "1. Read the diff: transport moved, an endpoint started answering differently, or fields appeared/vanished.",
+              "2. If it is cosmetic (asset hashes only), refresh the baseline: `npm run drift:baseline` and commit.",
+              "3. If it is a contract change, fix the SDK, then refresh the baseline in the same PR.",
+              "",
+              "The nightly sandbox contract job is the other half of this: it charges the test card and",
+              "will fail loudly if the card or bank path actually broke.",
+            ].join("\n");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "drift",
+              per_page: 10,
+            });
+
+            const existing = issues.data.find((i) => (i.body || "").includes(marker));
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: body.replace(marker, ""),
+              });
+              core.info(`commented on #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Bachs checkout build drifted",
+                body,
+                labels: ["drift"],
+              });
+              core.info(`opened #${created.data.number}`);
+            }
+
+  contract:
+    name: sandbox contract (real charges, no real money)
+    runs-on: ubuntu-latest
+    needs: offline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+
+      - name: Check for the sandbox key
+        id: key
+        run: |
+          if [ -n "${{ secrets.BACHS_SANDBOX_KEY }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "BACHS_SANDBOX_KEY not set - skipping"
+          fi
+
+      - name: Integration tests
+        id: it
+        if: steps.key.outputs.present == 'true'
+        env:
+          BACHS_SECRET_KEY: ${{ secrets.BACHS_SANDBOX_KEY }}
+        run: npm run test:integration
+
+      - name: Open or update the contract issue
+        if: failure() && steps.key.outputs.present == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- bachs-contract -->";
+            const body = [
+              marker,
+              "The sandbox contract suite failed. This is the job that catches a real break: card,",
+              "bank transfer, crypto, mobile money, free sessions or custom pricing no longer behave",
+              "as the SDK expects.",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "Start from the failing test name, then check whether the build fingerprint job reported",
+              "drift on the same day. They usually agree.",
+            ].join("\n");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "contract",
+              per_page: 10,
+            });
+            const existing = issues.data.find((i) => (i.body || "").includes(marker));
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: body.replace(marker, ""),
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Sandbox contract suite is failing",
+                body,
+                labels: ["contract"],
+              });
+            }

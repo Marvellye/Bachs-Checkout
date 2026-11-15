@@ -561,6 +561,40 @@ On a timeout or 5xx, `isUncertainWrite(err)` is `true` — reconcile by listing 
 
 ---
 
+## Keeping up with Bachs
+
+Bachs redeploys the hosted checkout without notice. On 2026-10-31 it moved from Next.js server
+actions to a Vite SPA on REST, which broke every card charge until the transport fix landed. The repo
+watches for that now, daily, in `.github/workflows/drift.yml`:
+
+| Job | What it proves |
+| --- | --- |
+| offline | unit tests and the type check, no credentials needed |
+| fingerprint | the checkout build still has the endpoints and fields the SDK depends on |
+| contract | real sandbox charges for card, bank, crypto, money, free and custom pricing |
+
+The fingerprint job compares the live build against `.github/fingerprint.json` and fails when the
+transport moves, assets change, an endpoint starts answering differently, or a response gains or
+loses fields. When it fails it opens (or comments on) an issue labelled `drift`, with the diff and
+an artifact holding the current fingerprint.
+
+```bash
+npm run drift:check      # compare against the committed baseline
+npm run drift:baseline   # accept today's build as the new baseline
+```
+
+Refresh the baseline when the change is cosmetic (asset hashes only). When it is a contract change,
+fix the SDK first and refresh the baseline in the same PR, or the alarm will fire every night until
+someone mutes it.
+
+**Three scheduling facts worth knowing.** GitHub cron runs in UTC and is best effort, so the job is
+pinned to 06:17 rather than 06:00. Scheduled workflows only run on the default branch. And GitHub
+disables a schedule after 60 days of repository inactivity, so a repo nobody commits to stops being
+watched: a push now and then keeps it alive, which is itself a fair proxy for "is anyone home".
+
+The workflow only holds a **sandbox** key as `BACHS_SANDBOX_KEY`; the script refuses a live key
+outright, because these runs create sessions and charges. Live checks stay manual.
+
 ## Caveats
 
 Read these; each one cost real time.

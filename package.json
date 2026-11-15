@@ -36,7 +36,9 @@
     "example": "node examples/server.mjs",
     "prepublishOnly": "npm run typecheck && npm test",
     "verify:pack": "node scripts/verify-pack.mjs",
-    "typecheck": "tsc -p tsconfig.types.json"
+    "typecheck": "tsc -p tsconfig.types.json",
+    "drift:check": "node scripts/fingerprint.mjs --compare .github/fingerprint.json",
+    "drift:baseline": "node scripts/fingerprint.mjs > .github/fingerprint.json"
   },
   "keywords": [
     "bachs",
